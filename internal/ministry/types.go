@@ -3,26 +3,46 @@ package ministry
 import "encoding/json"
 
 // HUnit represents a single Health Unit returned by the /rv/searchhunits endpoint.
-// It maps the exact JSON fields returned by the Hellenic API.
 type HUnit struct {
-	HUnitID   json.RawMessage `json:"hunitId"`
-	HUnit     *int            `json:"hunit"`
-	HUnitType *int            `json:"hunittype"`
-	Name      string          `json:"name"`
-	City      string          `json:"city"`
-	Latitude  float64         `json:"lattitude"` // Notice the typo in the API
-	Longitude float64         `json:"longitude"`
-	ForeasID  int             `json:"-"` // We inject this manually later
+	HUnitID      json.RawMessage `json:"hunitId"`
+	HUnit        *int            `json:"hunit"`
+	HUnitType    *int            `json:"hunittype"`
+	Name         string          `json:"name"`
+	City         string          `json:"city"`
+	Zip          string          `json:"zip"`
+	Phone1       string          `json:"phone1"`
+	Phone2       string          `json:"phone2"`
+	Address      string          `json:"address"`
+	Latitude     float64         `json:"lattitude"`
+	Longitude    float64         `json:"longitude"`
+	ForeasID     int             `json:"-"`
+	Region       *int            `json:"region"`
+	Prefecture   *int            `json:"prefecture"`
+	IsActive     *int            `json:"isactive"`
+	Clinics      []interface{}   `json:"clinics"`
+	ResponseCode int             `json:"responseCode"`
 }
 
-// Specialty represents a medical specialty metadata as returned by /gen/getspecialities.
+// Specialty represents a medical specialty metadata.
 type Specialty struct {
 	ID   int    `json:"speciality"`
 	Name string `json:"name"`
 }
 
-// SearchPayload represents the outgoing JSON body required by /rv/searchhunits
-// The Ministry API uses a mix of camelCase and some uppercase IDs.
+// Slot represents an available appointment time.
+type Slot struct {
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
+	IsFree    bool   `json:"isFree"`
+}
+
+// DaySlots represents a day's worth of slots for a unit.
+type DaySlots struct {
+	Date  string `json:"date"`
+	Slots []Slot `json:"slots"`
+}
+
+// SearchPayload represents the outgoing JSON body for searches and availability.
 type SearchPayload struct {
 	StartDate    string `json:"startDate"`
 	EndDate      string `json:"endDate"`
