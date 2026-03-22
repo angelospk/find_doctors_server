@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/angelospk/find_doctors_server/internal/ministry"
 )
@@ -14,6 +15,7 @@ type MockMinistryClient struct {
 	FirstAvailableSlotFunc func(ctx context.Context, payload ministry.SearchPayload) (string, error)
 	GetSpecialtiesFunc     func(ctx context.Context) ([]ministry.Specialty, error)
 	GetSlotsInitFunc       func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error)
+	GetActualSlotsFunc     func(ctx context.Context, payload ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error)
 }
 
 func (m *MockMinistryClient) SearchHUnits(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
@@ -40,6 +42,13 @@ func (m *MockMinistryClient) GetSpecialties(ctx context.Context) ([]ministry.Spe
 func (m *MockMinistryClient) GetSlotsInit(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
 	if m.GetSlotsInitFunc != nil {
 		return m.GetSlotsInitFunc(ctx, payload)
+	}
+	return nil, nil
+}
+
+func (m *MockMinistryClient) GetActualSlots(ctx context.Context, payload ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error) {
+	if m.GetActualSlotsFunc != nil {
+		return m.GetActualSlotsFunc(ctx, payload)
 	}
 	return nil, nil
 }
@@ -276,4 +285,114 @@ func TestAggregator_HospitalCapacity_Enhanced(t *testing.T) {
 	if s.FirstDate == nil || *s.FirstDate != "2024-06-01" {
 		t.Errorf("Expected date 2024-06-01, got %v", s.FirstDate)
 	}
+}
+
+func TestAggregator_GetGranularSlots(t *testing.T) {
+	hUnitID := 21
+	foreasID := 1
+	specID := 6
+	date := "2026-03-23" // Monday
+
+	mockClient := &MockMinistryClient{
+		GetSlotsInitFunc: func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
+			return []ministry.SlotGroup{
+				{Day: int(time.Monday), GroupID: 1, GroupColor: "disabled", GroupName: "06:00-09:00"},
+				{Day: int(time.Monday), GroupID: 2, GroupColor: "available", GroupName: "09:00-12:00"}, // Group 2
+				{Day: int(time.Monday), GroupID: 3, GroupColor: "available", GroupName: "12:00-15:00"}, // Group 3
+			}, nil
+		},
+		GetActualSlotsFunc: func(ctx context.Context, payload ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error) {
+			if payload.GroupID == 2 {
+				return []ministry.ActualSlot{
+					{HUnitID: hUnitID, RVTime: "09:30", RVDate: "2026-05-07T09:30:00Z", DocName: "Dr. Papadopoulos"},
+					{HUnitID: hUnitID, RVTime: "10:15", RVDate: "2026-05-07T10:15:00Z", DocName: "Dr. Papadopoulos"},
+				}, nil
+			}
+			if payload.GroupID == 3 {
+				return []ministry.ActualSlot{
+					{HUnitID: hUnitID, RVTime: "12:00", RVDate: "2026-05-07T12:00:00Z", DocName: "Dr. Ioannou"},
+				}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	agg := New(mockClient)
+	ctx := context.Background()
+
+	slots, err := agg.GetGranularSlots(ctx, hUnitID, foreasID, nil, specID, date)
+	if err != nil {
+		t.Fatalf("GetGranularSlots failed: %v", err)
+	}
+
+	if len(slots) != 3 {
+		t.Errorf("Expected 3 slots, got %d", len(slots))
+	}
+
+	// Verify order (sorted by time)
+	if slots[0].Time != "09:30" || slots[1].Time != "10:15" || slots[2].Time != "12:00" {
+		t.Errorf("Slots not sorted correctly: %v", slots)
+	}
+
+	// Verify flattening
+	if slots[0].DocName != "Dr. Papadopoulos" || slots[2].DocName != "Dr. Ioannou" {
+		t.Errorf("Doctor names not preserved correctly")
+	}
+
+	// Print results for visual confirmation
+	for _, s := range slots {
+		t.Logf(" - [%s] %s (Group: %d) (Comments: %s)", s.Time, s.DocName, s.GroupID, s.Comments)
+	}
+}
+
+func TestAggregator_GetGranularSlots_WithComments(t *testing.T) {
+	mockClient := &MockMinistryClient{
+		GetSlotsInitFunc: func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
+			return []ministry.SlotGroup{
+				{Day: 1, GroupID: 1, GroupName: "08:00-11:00", GroupColor: "green"},
+			}, nil
+		},
+		GetActualSlotsFunc: func(ctx context.Context, payload ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error) {
+			if payload.GroupID == 1 {
+				return []ministry.ActualSlot{
+					{
+						HUnitID: 123,
+						RVDate:  "2026-03-23T08:30:00.000+0200",
+						RVTime:  "08:30",
+						DocName: "Dr. Commentator",
+						Address: "123 Comment St",
+						City:    "Literal City",
+						Comments: func(s string) *string { return &s }("Requires medical record."),
+						Comments2: func(s string) *string { return &s }("Please arrive 15m early."),
+						RVTName: "Specialized",
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	agg := New(mockClient)
+	ctx := context.Background()
+
+	// Monday, 2026-03-23
+	slots, err := agg.GetGranularSlots(ctx, 123, 1, nil, 1, "2026-03-23")
+	if err != nil {
+		t.Fatalf("Failed to get slots: %v", err)
+	}
+
+	if len(slots) != 1 {
+		t.Fatalf("Expected 1 slot, got %d", len(slots))
+	}
+
+	expectedComment := "Requires medical record. Please arrive 15m early."
+	if slots[0].Comments != expectedComment {
+		t.Errorf("Expected comments %q, got %q", expectedComment, slots[0].Comments)
+	}
+
+	if slots[0].RVTName != "Specialized" {
+		t.Errorf("Expected RVTName %q, got %q", "Specialized", slots[0].RVTName)
+	}
+
+	t.Logf("Result: %v", slots[0])
 }

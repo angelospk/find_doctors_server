@@ -17,6 +17,7 @@ type MinistryClient interface {
 	FirstAvailableSlot(ctx context.Context, payload ministry.SearchPayload) (string, error)
 	GetSpecialties(ctx context.Context) ([]ministry.Specialty, error)
 	GetSlotsInit(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error)
+	GetActualSlots(ctx context.Context, payload ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error)
 }
 
 // Aggregator coordinates concurrent searches across different entities.
@@ -184,6 +185,144 @@ func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, pa
 	})
 
 	return filtered
+}
+
+// GranularSlot represents an available appointment time with metadata for the UI.
+// tygo:generate
+type GranularSlot struct {
+	HUnitID   int    `json:"hunitId"`
+	Time      string `json:"time"`
+	Date      string `json:"date"`
+	DayOfWeek int    `json:"dayOfWeek"`
+	DocName   string `json:"docName"`
+	Address   string `json:"address"`
+	City      string `json:"city"`
+	GroupID   int    `json:"groupId"`
+	Comments  string `json:"comments"`
+	RVTName   string `json:"rvtName"`
+}
+
+// GetGranularSlots fetches and flattens all available appointment times for a unit on a given date.
+func (a *Aggregator) GetGranularSlots(ctx context.Context, hunitID, foreasID int, prefID *int, specialtyID int, date string) ([]GranularSlot, error) {
+	parsedDate, err := time.Parse(time.RFC3339, date)
+	if err != nil {
+		// Try simple date format
+		parsedDate, err = time.Parse("2006-01-02", date)
+		if err != nil {
+			return nil, fmt.Errorf("invalid date format: %w", err)
+		}
+	}
+
+	startDay := parsedDate.Truncate(24 * time.Hour)
+	endDay := startDay.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	// 1. Get capacity chunks (groups) for the day
+	payload := ministry.SlotsInitPayload{
+		StartDate:    startDay.Format("2006-01-02T15:04:05.000Z"),
+		EndDate:      endDay.Format("2006-01-02T15:04:05.000Z"),
+		SpecialityID: specialtyID,
+		PrefectureID: prefID,
+		HUnit:        &hunitID,
+		ForeasID:     foreasID,
+		IsCovid:      0,
+		IsOnlyFd:     0,
+		IsMachine:    0,
+	}
+
+	groups, err := a.client.GetSlotsInit(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Concurrently fetch actual slots for each group that has capacity
+	type result struct {
+		groupID int
+		slots   []ministry.ActualSlot
+		err     error
+	}
+
+	resChan := make(chan result, 12)
+	var wg sync.WaitGroup
+
+	for _, g := range groups {
+		// 1. Filter by requested day (only if API provides it, e.g. for PFY 7-day calendars)
+		if g.Day > 0 && g.Day != int(parsedDate.Weekday()) {
+			continue
+		}
+
+		// 2. Skip empty or invalid groups
+		if g.GroupColor == "" || g.GroupColor == "disabled" {
+			continue
+		}
+
+		day := g.Day
+		wg.Add(1)
+		go func(groupID int) {
+			defer wg.Done()
+			
+			// Prefecture ID is required for getactualslots or it returns []
+			pID := 0
+			if prefID != nil {
+				pID = *prefID
+			}
+
+			p := ministry.GetActualSlotsPayload{
+				Day:          day,
+				DDate:        startDay.Format("2006-01-02T15:04:05.000Z"),
+				GroupID:      groupID,
+				HUnit:        hunitID,
+				Foreas:       foreasID,
+				SpecialityID: specialtyID,
+				PrefectureID: pID,
+				IsOnlyFd:     0,
+				IsMachine:    0,
+				CDoorID:      nil,
+			}
+			slots, err := a.client.GetActualSlots(ctx, p)
+			resChan <- result{groupID: groupID, slots: slots, err: err}
+		}(g.GroupID)
+	}
+
+	wg.Wait()
+	close(resChan)
+
+	// 3. Flatten and unify results
+	var allSlots []GranularSlot
+	for r := range resChan {
+		if r.err != nil {
+			log.Printf("Warning: failed to fetch actual slots for group %d: %v", r.groupID, r.err)
+			continue
+		}
+
+		for _, s := range r.slots {
+			allSlots = append(allSlots, GranularSlot{
+				HUnitID:   s.HUnitID,
+				Time:      s.RVTime,
+				Date:      s.RVDate,
+				DayOfWeek: int(parsedDate.Weekday()),
+				DocName:   s.DocName,
+				Address:   s.Address,
+				City:      s.City,
+				GroupID:   r.groupID,
+				Comments:  fmt.Sprintf("%s %s", deref(s.Comments), deref(s.Comments2)),
+				RVTName:   s.RVTName,
+			})
+		}
+	}
+
+	// 4. Sort by time
+	sort.Slice(allSlots, func(i, j int) bool {
+		return allSlots[i].Time < allSlots[j].Time
+	})
+
+	return allSlots, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // SpecialtyCapacity represents the calculated fill-rate for a single specialty.

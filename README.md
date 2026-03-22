@@ -68,7 +68,34 @@ Get a detailed fill-rate report for a hospital, including actionable "Next Avail
 }
 ```
 
-### 3. Metadata Discovery
+### 3. Granular Appointment Slots
+Fetch detailed available times, doctor names, and clinic metadata for a specific unit and date.
+`GET /api/hospitals/{hunitId}/slots?specialtyId=X&date=YYYY-MM-DD&prefectureId=Y&foreasId=Z`
+
+**Parameters:**
+- `specialtyId` (Required): The ID of the medical specialty.
+- `date` (Required): Targeted date for appointments (YYYY-MM-DD).
+- `prefectureId` (Required): The regional code (necessary for granular lookups).
+- `foreasId` (Required): Unit type (1 for Hospitals, 18 for Health Centers).
+
+**Response:**
+```json
+[
+  {
+    "hunitId": 718,
+    "time": "10:45",
+    "date": "2026-03-26T10:45:00.000+0200",
+    "dayOfWeek": 4,
+    "docName": "ΚΩΝΣΤΑΝΤΙΝΙΔΗΣ ΑΡΙΣΤΕΙΔΗΣ",
+    "address": "6ο χλμ Εθνικής Οδού Αλεξανδρούπολης",
+    "city": "ΑΛΕΞΑΝΔΡΟΥΠΟΛΗ",
+    "comments": "ΠΡΟΣΟΧΗ ΤΟ ΙΑΤΡΕΙΟ ΕΞΕΤΑΖΕΙ ΠΑΙΔΙΑ...",
+    "rvtName": "Τακτικό"
+  }
+]
+```
+
+### 4. Metadata Discovery
 `GET /api/specialties` - Returns all medical specialties.
 
 ## 🏗️ Development

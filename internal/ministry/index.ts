@@ -91,7 +91,39 @@ export interface SlotsInitPayload {
  * SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
  */
 export interface SlotGroup {
+  day: number /* int */;
+  groupId: number /* int */;
   groupColor: string;
-  groupTitle: string;
+  groupName: string;
   responseCode: number /* int */;
+}
+/**
+ * ActualSlot represents a specific, granular appointment returned by /rv/getactualslots.
+ * tygo:generate
+ */
+export interface ActualSlot {
+  hUnitId: number /* int */;
+  rvDate: string;
+  rvtime: string;
+  doc_name: string;
+  address: string;
+  city: string;
+  comments?: string;
+  comments2?: string;
+  rvtname: string;
+}
+/**
+ * GetActualSlotsPayload represents the request body for /rv/getactualslots.
+ */
+export interface GetActualSlotsPayload {
+  day: number /* int */;
+  ddate: string;
+  groupId: number /* int */;
+  hunit: number /* int */;
+  foreas: number /* int */;
+  specialityId: number /* int */;
+  prefectureId: number /* int */;
+  isOnlyFd: number /* int */;
+  isMachine: number /* int */;
+  cDoorId?: number /* int */;
 }

@@ -34,6 +34,22 @@ export interface SmartSearchOptions {
   MaxDistance: number /* float64 */; // in km
 }
 /**
+ * GranularSlot represents an available appointment time with metadata for the UI.
+ * tygo:generate
+ */
+export interface GranularSlot {
+  hunitId: number /* int */;
+  time: string;
+  date: string;
+  dayOfWeek: number /* int */;
+  docName: string;
+  address: string;
+  city: string;
+  groupId: number /* int */;
+  comments: string;
+  rvtName: string;
+}
+/**
  * SpecialtyCapacity represents the calculated fill-rate for a single specialty.
  * tygo:generate
  */

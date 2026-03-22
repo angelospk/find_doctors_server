@@ -12,8 +12,8 @@ func TestHospitalCapacity_AllDisabled(t *testing.T) {
 	mockClient := &MockMinistryClient{
 		GetSlotsInitFunc: func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
 			return []ministry.SlotGroup{
-				{GroupColor: "disabled", GroupTitle: "1"},
-				{GroupColor: "disabled", GroupTitle: "2"},
+				{GroupColor: "disabled", GroupName: "1"},
+				{GroupColor: "disabled", GroupName: "2"},
 			}, nil
 		},
 	}
@@ -43,10 +43,10 @@ func TestHospitalCapacity_MixedSlots(t *testing.T) {
 	mockClient := &MockMinistryClient{
 		GetSlotsInitFunc: func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
 			return []ministry.SlotGroup{
-				{GroupColor: "warning", GroupTitle: "1"},
-				{GroupColor: "disabled", GroupTitle: "2"},
-				{GroupColor: "danger", GroupTitle: "3"},
-				{GroupColor: "disabled", GroupTitle: "4"},
+				{GroupColor: "warning", GroupName: "1"},
+				{GroupColor: "disabled", GroupName: "2"},
+				{GroupColor: "danger", GroupName: "3"},
+				{GroupColor: "disabled", GroupName: "4"},
 			}, nil
 		},
 	}
