@@ -80,7 +80,7 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 // tygo:generate
 type ScannedUnit struct {
 	ministry.HUnit
-	FirstDate string `json:"firstDate"`
+	FirstDate *string `json:"firstDate"`
 }
 
 // FastScanner concurrently checks the first available slot for a list of units.
@@ -111,17 +111,16 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 			p.ForeasID = unit.ForeasID
 
 			dateStr, err := a.client.FirstAvailableSlot(ctx, p)
-			if err != nil || len(dateStr) != 10 {
-				fmt.Printf("Unit %d (%s) result: error/invalid (%v / %s)\n", *unit.HUnit, unit.Name, err, dateStr)
-				// Ignore errors or invalid date formats (like HTML error pages or empty "")
-				return
+			var datePtr *string
+			if err == nil && len(dateStr) == 10 {
+				datePtr = &dateStr
 			}
 
-			fmt.Printf("Unit %d (%s) result: %s\n", *unit.HUnit, unit.Name, dateStr)
+			fmt.Printf("Unit %d (%s) result: %v\n", *unit.HUnit, unit.Name, datePtr)
 			mu.Lock()
 			results = append(results, ScannedUnit{
 				HUnit:     unit,
-				FirstDate: dateStr,
+				FirstDate: datePtr,
 			})
 			mu.Unlock()
 		}(u)
@@ -131,12 +130,69 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 	return results
 }
 
+// SmartSearchOptions defines search constraints for prioritized results.
+type SmartSearchOptions struct {
+	Lat         *float64
+	Lon         *float64
+	MaxDistance float64 // in km
+}
+
+// SmartSearch combines availability scanning with geographic filtering and multi-level sorting.
+// It prioritizes "Soonest" (Date) then "Closest" (Distance) within a specific radius.
+func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, payload ministry.SearchPayload, opts SmartSearchOptions) []ScannedUnit {
+	// 1. Scan availability for all candidates
+	scanned := a.FastScanner(ctx, units, payload)
+
+	// 2. Filter by distance if coordinates and max distance provided
+	var filtered []ScannedUnit
+	if opts.MaxDistance > 0 && opts.Lat != nil && opts.Lon != nil {
+		for _, u := range scanned {
+			d := distance(*opts.Lat, *opts.Lon, u.Latitude, u.Longitude)
+			if d <= opts.MaxDistance {
+				filtered = append(filtered, u)
+			}
+		}
+	} else {
+		filtered = scanned
+	}
+
+	// 3. Multi-level Sorting:
+	// Primary: FirstAvailableDate ASC
+	// Secondary: Distance from user ASC
+	sort.Slice(filtered, func(i, j int) bool {
+		// Handle nil dates: push to the end
+		if filtered[i].FirstDate == nil && filtered[j].FirstDate == nil {
+			return false
+		}
+		if filtered[i].FirstDate == nil {
+			return false
+		}
+		if filtered[j].FirstDate == nil {
+			return true
+		}
+
+		if *filtered[i].FirstDate != *filtered[j].FirstDate {
+			return *filtered[i].FirstDate < *filtered[j].FirstDate
+		}
+		// Sub-sort by distance if coordinates are available
+		if opts.Lat != nil && opts.Lon != nil {
+			distI := distance(*opts.Lat, *opts.Lon, filtered[i].Latitude, filtered[i].Longitude)
+			distJ := distance(*opts.Lat, *opts.Lon, filtered[j].Latitude, filtered[j].Longitude)
+			return distI < distJ
+		}
+		return false
+	})
+
+	return filtered
+}
+
 // SpecialtyCapacity represents the calculated fill-rate for a single specialty.
 // tygo:generate
 type SpecialtyCapacity struct {
-	ID       int     `json:"specialityId"`
-	Name     string  `json:"name"`
-	FillRate float64 `json:"fillRate"` // Percentage of "disabled" slots
+	ID        int     `json:"specialtyId"`
+	Name      string  `json:"name"`
+	FillRate  float64 `json:"fillRate"`  // Percentage of "disabled" slots
+	FirstDate *string `json:"firstDate"` // Earliest available slot
 }
 
 // CapacityReport represents the overall capacity for a medical unit.
@@ -202,8 +258,34 @@ func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int
 				return
 			}
 
+			// Also fetch the first available slot date for this specialty to make the heatmap actionable
+			searchPayload := ministry.SearchPayload{
+				StartDate:    startStr,
+				EndDate:      time.Now().AddDate(0, 6, 0).UTC().Format("2006-01-02T15:04:05.000Z"),
+				SpecialityID: s.ID,
+				PrefectureID: prefID,
+				HUnit:        &hunitID,
+				ForeasID:     foreasID,
+			}
+			firstDate, err := a.client.FirstAvailableSlot(ctx, searchPayload)
+			if err != nil {
+				log.Printf("Warning: failed to check first slot for unit %d specialty %d: %v", hunitID, s.ID, err)
+			}
+			var datePtr *string
+			if len(firstDate) == 10 {
+				datePtr = &firstDate
+			}
+
 			if len(groups) == 0 {
-				resChan <- result{spec: s, err: nil} // No slots returned, skip
+				resChan <- result{
+					spec: s,
+					cap: SpecialtyCapacity{
+						ID:        s.ID,
+						Name:      s.Name,
+						FillRate:  0.0,
+						FirstDate: datePtr,
+					},
+				}
 				return
 			}
 
@@ -212,9 +294,10 @@ func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int
 				resChan <- result{
 					spec: s,
 					cap: SpecialtyCapacity{
-						ID:       s.ID,
-						Name:     s.Name,
-						FillRate: 0.0, // Treat as available (0% full)
+						ID:        s.ID,
+						Name:      s.Name,
+						FillRate:  0.0, // Treat as available (0% full)
+						FirstDate: datePtr,
 					},
 				}
 				return
@@ -233,7 +316,15 @@ func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int
 			}
 
 			if total == 0 {
-				resChan <- result{spec: s, err: nil}
+				resChan <- result{
+					spec: s,
+					cap: SpecialtyCapacity{
+						ID:        s.ID,
+						Name:      s.Name,
+						FillRate:  0.0,
+						FirstDate: datePtr,
+					},
+				}
 				return
 			}
 
@@ -241,9 +332,10 @@ func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int
 			resChan <- result{
 				spec: s,
 				cap: SpecialtyCapacity{
-					ID:       s.ID,
-					Name:     s.Name,
-					FillRate: fillRate,
+					ID:        s.ID,
+					Name:      s.Name,
+					FillRate:  fillRate,
+					FirstDate: datePtr,
 				},
 			}
 		}(spec)

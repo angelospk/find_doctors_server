@@ -19,8 +19,7 @@ func main() {
 	server := api.NewServer(agg)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/nationwide", server.HandleNationwideSearch)
-	mux.HandleFunc("/api/emergency", server.HandleEmergency)
+	mux.HandleFunc("/api/search", server.HandleSmartSearch)
 	mux.HandleFunc("/api/specialties", server.HandleGetSpecialties)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/capacity", server.HandleHospitalCapacity)
 

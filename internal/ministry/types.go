@@ -15,7 +15,7 @@ type HUnit struct {
 	Address      string          `json:"address"`
 	Latitude     float64         `json:"lattitude"`
 	Longitude    float64         `json:"longitude"`
-	ForeasID     int             `json:"-"`
+	ForeasID     int             `json:"foreasId"`
 	Region       *int            `json:"region"`
 	Prefecture   *int            `json:"prefecture"`
 	IsActive     *int            `json:"isactive"`

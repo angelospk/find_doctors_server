@@ -29,6 +29,7 @@ export interface HUnit {
   address: string;
   lattitude: number /* float64 */;
   longitude: number /* float64 */;
+  foreasId: number /* int */;
   region?: number /* int */;
   prefecture?: number /* int */;
   isactive?: number /* int */;

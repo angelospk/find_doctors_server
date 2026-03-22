@@ -3,9 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -29,18 +27,32 @@ type SearchResponse struct {
 	Results []aggregator.ScannedUnit `json:"results"`
 }
 
-// HandleNationwideSearch acts as a proxy to find all available units across the country.
-// Example: GET /api/nationwide?specialtyId=6
-func (s *Server) HandleNationwideSearch(w http.ResponseWriter, r *http.Request) {
-	specialityIDStr := r.URL.Query().Get("specialtyId")
-	specialityID, err := strconv.Atoi(specialityIDStr)
+// HandleSmartSearch handles the unified prioritized search.
+// GET /api/search?specialtyId=6&lat=37.9&lon=23.7&maxDistanceInKm=200
+func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
+	specIDStr := r.URL.Query().Get("specialtyId")
+	if specIDStr == "" {
+		http.Error(w, "missing specialtyId", http.StatusBadRequest)
+		return
+	}
+	specialtyID, err := strconv.Atoi(specIDStr)
 	if err != nil {
-		http.Error(w, "invalid or missing specialtyId", http.StatusBadRequest)
+		http.Error(w, "invalid specialtyId: must be an integer", http.StatusBadRequest)
 		return
 	}
 
-	startDate := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	endDate := time.Now().AddDate(0, 6, 0).UTC().Format("2006-01-02T15:04:05.000Z")
+	var lat, lon *float64
+	if latStr := r.URL.Query().Get("lat"); latStr != "" {
+		if val, err := strconv.ParseFloat(latStr, 64); err == nil {
+			lat = &val
+		}
+	}
+	if lonStr := r.URL.Query().Get("lon"); lonStr != "" {
+		if val, err := strconv.ParseFloat(lonStr, 64); err == nil {
+			lon = &val
+		}
+	}
+	maxDist, _ := strconv.ParseFloat(r.URL.Query().Get("maxDistanceInKm"), 64)
 
 	var prefPtr *int
 	if prefStr := r.URL.Query().Get("prefectureId"); prefStr != "" {
@@ -50,89 +62,29 @@ func (s *Server) HandleNationwideSearch(w http.ResponseWriter, r *http.Request) 
 	}
 
 	payload := ministry.SearchPayload{
-		StartDate:    startDate,
-		EndDate:      endDate,
-		SpecialityID: specialityID,
+		StartDate:    time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		EndDate:      time.Now().AddDate(0, 6, 0).UTC().Format("2006-01-02T15:04:05.000Z"),
+		SpecialityID: specialtyID,
 		PrefectureID: prefPtr,
-		IsCovid:      0,
-		IsOnlyFd:     0,
-		IsMachine:    0,
 	}
 
-	ctx := context.Background()
-	// 1. Concurrent Cross-Entity Search (Foreas 1 + 18)
+	ctx := r.Context()
+	// 1. Initial candidates discovery
 	units, err := s.agg.SearchUnified(ctx, payload)
 	if err != nil {
-		http.Error(w, "failed to search health units: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "search failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 2. Concurrent Fast Scanner filtering
-	scanned := s.agg.FastScanner(ctx, units, payload)
-
-	response := SearchResponse{
-		Count:   len(scanned),
-		Results: scanned,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-// HandleEmergency finds the closest available appointments for a specialty.
-// Example: GET /api/emergency?specialtyId=6&lat=37.9838&lon=23.7275
-func (s *Server) HandleEmergency(w http.ResponseWriter, r *http.Request) {
-	specialityIDStr := r.URL.Query().Get("specialtyId")
-	specialityID, _ := strconv.Atoi(specialityIDStr)
-	latStr := r.URL.Query().Get("lat")
-	lonStr := r.URL.Query().Get("lon")
-	userLat, _ := strconv.ParseFloat(latStr, 64)
-	userLon, _ := strconv.ParseFloat(lonStr, 64)
-
-	if specialityID == 0 {
-		http.Error(w, "missing specialtyId", http.StatusBadRequest)
-		return
-	}
-
-	payload := ministry.SearchPayload{
-		StartDate:    time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
-		EndDate:      time.Now().AddDate(0, 1, 0).UTC().Format("2006-01-02T15:04:05.000Z"),
-		SpecialityID: specialityID,
-		PrefectureID: nil, // Search nationwide to find "closest" regardless of prefecture
-	}
-
-	units, err := s.agg.SearchUnified(context.Background(), payload)
-	if err != nil {
-		http.Error(w, "failed to search units", http.StatusInternalServerError)
-		return
-	}
-
-	// Calculate distances if lat/lon provided
-	if userLat != 0 && userLon != 0 {
-		sort.Slice(units, func(i, j int) bool {
-			return distance(userLat, userLon, units[i].Latitude, units[i].Longitude) <
-				distance(userLat, userLon, units[j].Latitude, units[j].Longitude)
-		})
-	}
-
-	// Limit to top 10 closest units for the "Fast Scanner" to avoid excessive API calls
-	if len(units) > 10 {
-		units = units[:10]
-	}
-
-	scanned := s.agg.FastScanner(context.Background(), units, payload)
-
-	// Sort by date then distance
-	sort.Slice(scanned, func(i, j int) bool {
-		if scanned[i].FirstDate != scanned[j].FirstDate {
-			return scanned[i].FirstDate < scanned[j].FirstDate
-		}
-		return distance(userLat, userLon, scanned[i].Latitude, scanned[i].Longitude) <
-			distance(userLat, userLon, scanned[j].Latitude, scanned[j].Longitude)
+	// 2. Prioritized scanning and sorting
+	results := s.agg.SmartSearch(ctx, units, payload, aggregator.SmartSearchOptions{
+		Lat:         lat,
+		Lon:         lon,
+		MaxDistance: maxDist,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(scanned)
+	json.NewEncoder(w).Encode(results)
 }
 
 // HandleGetSpecialties returns the cached list of medical specialties.
@@ -183,8 +135,31 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Filter specialties if specific ID provided
+	var filteredSpecs []ministry.Specialty
+	specIDQuery := r.URL.Query().Get("specialtyId")
+	if specIDQuery != "" {
+		targetID, err := strconv.Atoi(specIDQuery)
+		if err != nil {
+			http.Error(w, "invalid specialtyId: must be an integer", http.StatusBadRequest)
+			return
+		}
+		for _, spec := range specs {
+			if spec.ID == targetID {
+				filteredSpecs = append(filteredSpecs, spec)
+				break
+			}
+		}
+		if len(filteredSpecs) == 0 {
+			http.Error(w, "unknown specialtyId", http.StatusNotFound)
+			return
+		}
+	} else {
+		filteredSpecs = specs
+	}
+
 	// 2. Aggregate capacity
-	report, err := s.agg.HospitalCapacity(context.Background(), hunitID, foreasID, prefPtr, specs)
+	report, err := s.agg.HospitalCapacity(context.Background(), hunitID, foreasID, prefPtr, filteredSpecs)
 	if err != nil {
 		http.Error(w, "failed to generate capacity report: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -194,14 +169,3 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(report)
 }
 
-// distance calculates the Haversine distance between two points in km.
-func distance(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371 // Earth radius in km
-	dLat := (lat2 - lat1) * (math.Pi / 180)
-	dLon := (lon2 - lon1) * (math.Pi / 180)
-	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
-		math.Cos(lat1*(math.Pi/180))*math.Cos(lat2*(math.Pi/180))*
-			math.Sin(dLon/2)*math.Sin(dLon/2)
-	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-	return R * c
-}
