@@ -6,3 +6,15 @@ import { HUnit } from "./ministry";
 export interface ScannedUnit extends HUnit {
   firstDate: string;
 }
+
+export interface SpecialtyCapacity {
+  specialityId: number;
+  name: string;
+  fillRate: number; // Percentage of "disabled" slots
+}
+
+export interface CapacityReport {
+  hunitId: number;
+  scanned: number;
+  specialties: SpecialtyCapacity[];
+}

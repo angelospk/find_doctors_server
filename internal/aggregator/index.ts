@@ -14,8 +14,27 @@ export interface Aggregator {
 }
 /**
  * ScannedUnit represents a health unit with its earliest available appointment date.
+ * tygo:generate
  */
 export interface ScannedUnit {
   HUnit: any /* ministry.HUnit */;
   firstDate: string;
+}
+/**
+ * SpecialtyCapacity represents the calculated fill-rate for a single specialty.
+ * tygo:generate
+ */
+export interface SpecialtyCapacity {
+  specialityId: number /* int */;
+  name: string;
+  fillRate: number /* float64 */; // Percentage of "disabled" slots
+}
+/**
+ * CapacityReport represents the overall capacity for a medical unit.
+ * tygo:generate
+ */
+export interface CapacityReport {
+  hunitId: number /* int */;
+  scanned: number /* int */;
+  specialties: SpecialtyCapacity[];
 }

@@ -13,6 +13,7 @@ type MockMinistryClient struct {
 	SearchHUnitsFunc       func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error)
 	FirstAvailableSlotFunc func(ctx context.Context, payload ministry.SearchPayload) (string, error)
 	GetSpecialtiesFunc     func(ctx context.Context) ([]ministry.Specialty, error)
+	GetSlotsInitFunc       func(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error)
 }
 
 func (m *MockMinistryClient) SearchHUnits(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
@@ -32,6 +33,13 @@ func (m *MockMinistryClient) FirstAvailableSlot(ctx context.Context, payload min
 func (m *MockMinistryClient) GetSpecialties(ctx context.Context) ([]ministry.Specialty, error) {
 	if m.GetSpecialtiesFunc != nil {
 		return m.GetSpecialtiesFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockMinistryClient) GetSlotsInit(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error) {
+	if m.GetSlotsInitFunc != nil {
+		return m.GetSlotsInitFunc(ctx, payload)
 	}
 	return nil, nil
 }

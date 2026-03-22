@@ -55,3 +55,23 @@ type SearchPayload struct {
 	IsOnlyFd     int    `json:"isOnlyFd"`
 	IsMachine    int    `json:"isMachine"`
 }
+
+// SlotsInitPayload represents the request body for /rv/getslotsinit.
+type SlotsInitPayload struct {
+	StartDate    string `json:"startDate"`
+	EndDate      string `json:"endDate"`
+	SpecialityID int    `json:"specialityID"`
+	PrefectureID *int   `json:"prefectureID"`
+	HUnit        *int   `json:"hunit"`
+	ForeasID     int    `json:"foreasID"`
+	IsCovid      int    `json:"isCovid"`
+	IsOnlyFd     int    `json:"isOnlyFd"`
+	IsMachine    int    `json:"isMachine"`
+}
+
+// SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
+type SlotGroup struct {
+	GroupColor   string `json:"groupColor"`
+	GroupTitle   string `json:"groupTitle"`
+	ResponseCode int    `json:"responseCode"`
+}

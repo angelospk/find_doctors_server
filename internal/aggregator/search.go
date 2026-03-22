@@ -3,6 +3,8 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ type MinistryClient interface {
 	SearchHUnits(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error)
 	FirstAvailableSlot(ctx context.Context, payload ministry.SearchPayload) (string, error)
 	GetSpecialties(ctx context.Context) ([]ministry.Specialty, error)
+	GetSlotsInit(ctx context.Context, payload ministry.SlotsInitPayload) ([]ministry.SlotGroup, error)
 }
 
 // Aggregator coordinates concurrent searches across different entities.
@@ -74,6 +77,7 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 }
 
 // ScannedUnit represents a health unit with its earliest available appointment date.
+// tygo:generate
 type ScannedUnit struct {
 	ministry.HUnit
 	FirstDate string `json:"firstDate"`
@@ -125,6 +129,147 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 
 	wg.Wait()
 	return results
+}
+
+// SpecialtyCapacity represents the calculated fill-rate for a single specialty.
+// tygo:generate
+type SpecialtyCapacity struct {
+	ID       int     `json:"specialityId"`
+	Name     string  `json:"name"`
+	FillRate float64 `json:"fillRate"` // Percentage of "disabled" slots
+}
+
+// CapacityReport represents the overall capacity for a medical unit.
+// tygo:generate
+type CapacityReport struct {
+	HUnitID     int                 `json:"hunitId"`
+	Scanned     int                 `json:"scanned"`
+	Specialties []SpecialtyCapacity `json:"specialties"`
+}
+
+// HospitalCapacity aggregates capacity across all specialties for a unit.
+// Window is hardcoded to the current week (Monday to Sunday).
+func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int, prefID *int, specialties []ministry.Specialty) (CapacityReport, error) {
+	now := time.Now().UTC()
+	// Next Monday to next Sunday
+	offset := 8 - int(now.Weekday())
+	if offset > 7 {
+		offset = 1
+	}
+	monday := now.AddDate(0, 0, offset).Truncate(24 * time.Hour)
+	sunday := monday.AddDate(0, 0, 6)
+
+	startStr := monday.Format("2006-01-02T15:04:05.000Z")
+	endStr := sunday.Format("2006-01-02T15:04:05.000Z")
+
+	report := CapacityReport{
+		HUnitID:     hunitID,
+		Specialties: make([]SpecialtyCapacity, 0),
+	}
+
+	type result struct {
+		spec ministry.Specialty
+		cap  SpecialtyCapacity
+		err  error
+	}
+
+	resChan := make(chan result, len(specialties))
+	sem := make(chan struct{}, 30) // Semaphore cap
+
+	var wg sync.WaitGroup
+	for _, spec := range specialties {
+		wg.Add(1)
+		go func(s ministry.Specialty) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			payload := ministry.SlotsInitPayload{
+				StartDate:    startStr,
+				EndDate:      endStr,
+				SpecialityID: s.ID,
+				PrefectureID: prefID,
+				HUnit:        &hunitID,
+				ForeasID:     foreasID,
+				IsCovid:      0,
+				IsOnlyFd:     0,
+				IsMachine:    0,
+			}
+
+			groups, err := a.client.GetSlotsInit(ctx, payload)
+			if err != nil {
+				resChan <- result{spec: s, err: err}
+				return
+			}
+
+			if len(groups) == 0 {
+				resChan <- result{spec: s, err: nil} // No slots returned, skip
+				return
+			}
+
+			// Handle responseCode: 2 (No appointments found)
+			if len(groups) == 1 && groups[0].ResponseCode == 2 {
+				resChan <- result{
+					spec: s,
+					cap: SpecialtyCapacity{
+						ID:       s.ID,
+						Name:     s.Name,
+						FillRate: 0.0, // Treat as available (0% full)
+					},
+				}
+				return
+			}
+
+			disabled := 0
+			total := 0
+			for _, g := range groups {
+				if g.GroupColor == "" {
+					continue // Meta info / error object
+				}
+				total++
+				if g.GroupColor == "disabled" {
+					disabled++
+				}
+			}
+
+			if total == 0 {
+				resChan <- result{spec: s, err: nil}
+				return
+			}
+
+			fillRate := (float64(disabled) / float64(total)) * 100.0
+			resChan <- result{
+				spec: s,
+				cap: SpecialtyCapacity{
+					ID:       s.ID,
+					Name:     s.Name,
+					FillRate: fillRate,
+				},
+			}
+		}(spec)
+	}
+
+	wg.Wait()
+	close(resChan)
+
+	for r := range resChan {
+		if r.err != nil {
+			log.Printf("Error scanning specialty %s (%d): %v", r.spec.Name, r.spec.ID, r.err)
+			continue
+		}
+		if r.cap.ID != 0 {
+			report.Specialties = append(report.Specialties, r.cap)
+		}
+	}
+
+	report.Scanned = len(report.Specialties)
+	
+	// Sort by fill rate descending
+	sort.Slice(report.Specialties, func(i, j int) bool {
+		return report.Specialties[i].FillRate > report.Specialties[j].FillRate
+	})
+
+	return report, nil
 }
 
 // GetSpecialties returns a cached list of specialties.

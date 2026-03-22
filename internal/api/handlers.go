@@ -146,6 +146,54 @@ func (s *Server) HandleGetSpecialties(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(specs)
 }
 
+// HandleHospitalCapacity returns a weekly capacity report for a specific hospital.
+// Example: GET /api/hospitals/70600/capacity
+func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) {
+	hunitIDStr := r.PathValue("hunitId")
+	if hunitIDStr == "" {
+		http.Error(w, "missing hunitId in path", http.StatusBadRequest)
+		return
+	}
+
+	hunitID, err := strconv.Atoi(hunitIDStr)
+	if err != nil {
+		http.Error(w, "invalid hunitId in path", http.StatusBadRequest)
+		return
+	}
+
+	// We'll also need foreasId, default to 1 (Hospitals)
+	foreasID := 1
+	if fStr := r.URL.Query().Get("foreasId"); fStr != "" {
+		if id, err := strconv.Atoi(fStr); err == nil {
+			foreasID = id
+		}
+	}
+
+	var prefPtr *int
+	if pStr := r.URL.Query().Get("prefectureId"); pStr != "" {
+		if id, err := strconv.Atoi(pStr); err == nil {
+			prefPtr = &id
+		}
+	}
+
+	// 1. Get specialties (to fan out)
+	specs, err := s.agg.GetSpecialties(context.Background())
+	if err != nil {
+		http.Error(w, "failed to fetch specialties", http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Aggregate capacity
+	report, err := s.agg.HospitalCapacity(context.Background(), hunitID, foreasID, prefPtr, specs)
+	if err != nil {
+		http.Error(w, "failed to generate capacity report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
 // distance calculates the Haversine distance between two points in km.
 func distance(lat1, lon1, lat2, lon2 float64) float64 {
 	const R = 6371 // Earth radius in km

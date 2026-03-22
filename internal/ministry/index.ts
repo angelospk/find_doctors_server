@@ -16,7 +16,6 @@ export interface Client {
 
 /**
  * HUnit represents a single Health Unit returned by the /rv/searchhunits endpoint.
- * It maps the exact JSON fields returned by the Hellenic API.
  */
 export interface HUnit {
   hunitId: any;
@@ -24,19 +23,42 @@ export interface HUnit {
   hunittype?: number /* int */;
   name: string;
   city: string;
-  lattitude: number /* float64 */; // Notice the typo in the API
+  zip: string;
+  phone1: string;
+  phone2: string;
+  address: string;
+  lattitude: number /* float64 */;
   longitude: number /* float64 */;
+  region?: number /* int */;
+  prefecture?: number /* int */;
+  isactive?: number /* int */;
+  clinics: any[];
+  responseCode: number /* int */;
 }
 /**
- * Specialty represents a medical specialty metadata as returned by /gen/getspecialities.
+ * Specialty represents a medical specialty metadata.
  */
 export interface Specialty {
   speciality: number /* int */;
   name: string;
 }
 /**
- * SearchPayload represents the outgoing JSON body required by /rv/searchhunits
- * The Ministry API uses a mix of camelCase and some uppercase IDs.
+ * Slot represents an available appointment time.
+ */
+export interface Slot {
+  startTime: string;
+  endTime: string;
+  isFree: boolean;
+}
+/**
+ * DaySlots represents a day's worth of slots for a unit.
+ */
+export interface DaySlots {
+  date: string;
+  slots: Slot[];
+}
+/**
+ * SearchPayload represents the outgoing JSON body for searches and availability.
  */
 export interface SearchPayload {
   startDate: string;
@@ -49,4 +71,26 @@ export interface SearchPayload {
   isCovid: number /* int */;
   isOnlyFd: number /* int */;
   isMachine: number /* int */;
+}
+/**
+ * SlotsInitPayload represents the request body for /rv/getslotsinit.
+ */
+export interface SlotsInitPayload {
+  startDate: string;
+  endDate: string;
+  specialityID: number /* int */;
+  prefectureID?: number /* int */;
+  hunit?: number /* int */;
+  foreasID: number /* int */;
+  isCovid: number /* int */;
+  isOnlyFd: number /* int */;
+  isMachine: number /* int */;
+}
+/**
+ * SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
+ */
+export interface SlotGroup {
+  groupColor: string;
+  groupTitle: string;
+  responseCode: number /* int */;
 }

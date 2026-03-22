@@ -24,13 +24,37 @@ This server acts as a specialized proxy that fixes the primary limitation of the
 Fetch all available specialties with zero lag.
 `GET /api/specialties`
 
+**Response:** 
+```json
+[{"id": 6, "name": "ΔΕΡΜΑΤΟΛΟΓΟΣ-ΑΦΡΟΔΙΣΙΟΛΟΓΟΣ"}, ...]
+```
+
 ### 2. Emergency Finder
 Find the closest Neurologist near Athens:
 `GET /api/emergency?specialtyId=10&lat=37.9838&lon=23.7275`
 
+**Response:** 
+```json
+[{"hunit": 70600, "name": "Γ.Ν.Α 'Κ.Α.Τ.'", "firstDate": "2026-03-24", "latitude": 38.0673, "longitude": 23.8041}]
+```
+
 ### 3. Nationwide specialist Hunt
 Find the next available Urologist anywhere in Greece:
 `GET /api/nationwide?specialtyId=12`
+
+**Response:**
+```json
+{"count": 15, "results": [{"hunit": 12345, "name": "K.Y. ΑΛΕΞΑΝΔΡΑΣ", "firstDate": "2026-04-01"}]}
+```
+
+### 4. Hospital Capacity Heatmap
+Find the weekly appointment fill-rate across all medical specialties for a specific health unit.
+`GET /api/hospitals/70600/capacity?prefectureId=11`
+
+**Response:**
+```json
+{"hunitId": 70600, "scanned": 46, "specialties": [{"specialityId": 22, "name": "ΑΓΓΕΙΟΧΕΙΡΟΥΡΓΟΣ", "fillRate": 85.5}, {"specialityId": 14, "name": "ΠΑΘΟΛΟΓΟΣ", "fillRate": 100}]}
+```
 
 ## 🏗️ Development
 

@@ -139,3 +139,39 @@ func TestClient_GetSpecialties(t *testing.T) {
 		t.Errorf("Expected spec ID 22, got %v", specs)
 	}
 }
+
+func TestClient_GetSlotsInit_Success(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/p-appointment/api/v1/rv/getslotsinit" {
+			t.Fatalf("Unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"groupColor": "warning", "groupTitle": "Available"}, {"groupColor": "disabled", "groupTitle": "Full"}]`))
+	}))
+	defer mockServer.Close()
+
+	client := NewClient(mockServer.URL)
+	groups, err := client.GetSlotsInit(context.Background(), SlotsInitPayload{})
+	if err != nil {
+		t.Fatalf("GetSlotsInit failed: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("Expected 2 groups, got %d", len(groups))
+	}
+	if groups[1].GroupColor != "disabled" {
+		t.Errorf("Expected 'disabled', got '%s'", groups[1].GroupColor)
+	}
+}
+
+func TestClient_GetSlotsInit_Non200(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer mockServer.Close()
+
+	client := NewClient(mockServer.URL)
+	_, err := client.GetSlotsInit(context.Background(), SlotsInitPayload{})
+	if err == nil {
+		t.Fatal("Expected error on 500 status, got nil")
+	}
+}

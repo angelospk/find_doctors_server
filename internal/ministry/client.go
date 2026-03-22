@@ -43,7 +43,7 @@ func (c *Client) SearchHUnits(ctx context.Context, payload SearchPayload) ([]HUn
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://www.finddoctors.gov.gr")
 	req.Header.Set("Referer", "https://www.finddoctors.gov.gr/p-appointment/")
-	req.Header.Set("User-Agent", "FindDoctors-Aggregator/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -88,7 +88,7 @@ func (c *Client) FirstAvailableSlot(ctx context.Context, payload SearchPayload) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://www.finddoctors.gov.gr")
 	req.Header.Set("Referer", "https://www.finddoctors.gov.gr/p-appointment/")
-	req.Header.Set("User-Agent", "FindDoctors-Aggregator/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -120,7 +120,7 @@ func (c *Client) GetSpecialties(ctx context.Context) ([]Specialty, error) {
 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "no-auth")
-	req.Header.Set("User-Agent", "FindDoctors-Aggregator/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -138,4 +138,43 @@ func (c *Client) GetSpecialties(ctx context.Context) ([]Specialty, error) {
 	}
 
 	return specs, nil
+}
+
+// GetSlotsInit retrieves the capacity calendar for a specific unit and specialty.
+func (c *Client) GetSlotsInit(ctx context.Context, payload SlotsInitPayload) ([]SlotGroup, error) {
+	url := fmt.Sprintf("%s/p-appointment/api/v1/rv/getslotsinit", c.BaseURL)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "no-auth")
+	req.Header.Set("Origin", "https://www.finddoctors.gov.gr")
+	req.Header.Set("Referer", "https://www.finddoctors.gov.gr/p-appointment/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	}
+
+	var groups []SlotGroup
+	if err := json.NewDecoder(res.Body).Decode(&groups); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return groups, nil
 }

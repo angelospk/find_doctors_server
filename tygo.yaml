@@ -1,7 +1,7 @@
 packages:
-  - path: "/Users/harold/projects/find_doctors_server/internal/ministry"
+  - path: "github.com/angelospk/find_doctors_server/internal/ministry"
     target: "types/ministry.ts"
     type_mappings:
       "json.RawMessage": "any"
-  - path: "/Users/harold/projects/find_doctors_server/internal/aggregator"
+  - path: "github.com/angelospk/find_doctors_server/internal/aggregator"
     target: "types/aggregator.ts"
