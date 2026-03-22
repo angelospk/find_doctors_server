@@ -169,3 +169,59 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(report)
 }
 
+// HandleGranularSlots returns detailed appointment slots for a specific unit and date.
+// Example: GET /api/hunits/21/slots?specialtyId=12&date=2026-03-26&prefectureId=5&foreasId=1
+func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
+	hunitIDStr := r.PathValue("hunitId")
+	if hunitIDStr == "" {
+		http.Error(w, "missing hunitId in path", http.StatusBadRequest)
+		return
+	}
+
+	hunitID, err := strconv.Atoi(hunitIDStr)
+	if err != nil {
+		http.Error(w, "invalid hunitId in path", http.StatusBadRequest)
+		return
+	}
+
+	specIDStr := r.URL.Query().Get("specialtyId")
+	if specIDStr == "" {
+		http.Error(w, "missing specialtyId in query", http.StatusBadRequest)
+		return
+	}
+	specialtyID, err := strconv.Atoi(specIDStr)
+	if err != nil {
+		http.Error(w, "invalid specialtyId in query", http.StatusBadRequest)
+		return
+	}
+
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		http.Error(w, "missing date in query", http.StatusBadRequest)
+		return
+	}
+
+	foreasID := 1
+	if fStr := r.URL.Query().Get("foreasId"); fStr != "" {
+		if id, err := strconv.Atoi(fStr); err == nil {
+			foreasID = id
+		}
+	}
+
+	var prefPtr *int
+	if pStr := r.URL.Query().Get("prefectureId"); pStr != "" {
+		if id, err := strconv.Atoi(pStr); err == nil {
+			prefPtr = &id
+		}
+	}
+
+	slots, err := s.agg.GetGranularSlots(r.Context(), hunitID, foreasID, prefPtr, specialtyID, date)
+	if err != nil {
+		http.Error(w, "failed to fetch granular slots: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(slots)
+}
+

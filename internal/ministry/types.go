@@ -71,7 +71,37 @@ type SlotsInitPayload struct {
 
 // SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
 type SlotGroup struct {
+	Day          int    `json:"day"`
+	GroupID      int    `json:"groupId"`
 	GroupColor   string `json:"groupColor"`
-	GroupTitle   string `json:"groupTitle"`
+	GroupName    string `json:"groupName"`
 	ResponseCode int    `json:"responseCode"`
+}
+
+// ActualSlot represents a specific, granular appointment returned by /rv/getactualslots.
+// tygo:generate
+type ActualSlot struct {
+	HUnitID int    `json:"hUnitId"`
+	RVDate  string `json:"rvDate"`
+	RVTime  string `json:"rvtime"`
+	DocName   string `json:"doc_name"`
+	Address   string `json:"address"`
+	City      string `json:"city"`
+	Comments  *string `json:"comments"`
+	Comments2 *string `json:"comments2"`
+	RVTName   string `json:"rvtname"`
+}
+
+// GetActualSlotsPayload represents the request body for /rv/getactualslots.
+type GetActualSlotsPayload struct {
+	Day          int    `json:"day"`
+	DDate        string `json:"ddate"`
+	GroupID      int    `json:"groupId"`
+	HUnit        int    `json:"hunit"`
+	Foreas       int    `json:"foreas"`
+	SpecialityID int    `json:"specialityId"`
+	PrefectureID int    `json:"prefectureId"`
+	IsOnlyFd     int    `json:"isOnlyFd"`
+	IsMachine    int    `json:"isMachine"`
+	CDoorID      *int   `json:"cDoorId"`
 }

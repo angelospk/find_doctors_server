@@ -1,3 +1,5 @@
 .agent/
 .claude/
 openspec/
+review.txt
+server.log

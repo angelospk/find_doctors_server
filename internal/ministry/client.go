@@ -178,3 +178,42 @@ func (c *Client) GetSlotsInit(ctx context.Context, payload SlotsInitPayload) ([]
 
 	return groups, nil
 }
+
+// GetActualSlots retrieves specific appointment times for a chosen day and group.
+func (c *Client) GetActualSlots(ctx context.Context, payload GetActualSlotsPayload) ([]ActualSlot, error) {
+	url := fmt.Sprintf("%s/p-appointment/api/v1/rv/getactualslots", c.BaseURL)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "no-auth")
+	req.Header.Set("Origin", "https://www.finddoctors.gov.gr")
+	req.Header.Set("Referer", "https://www.finddoctors.gov.gr/p-appointment/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	}
+
+	var slots []ActualSlot
+	if err := json.NewDecoder(res.Body).Decode(&slots); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return slots, nil
+}
