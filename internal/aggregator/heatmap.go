@@ -54,6 +54,12 @@ func (a *Aggregator) NationwideHeatmap(ctx context.Context, specialtyID int) (He
 	groups := make(map[int]*groupAccum)
 
 	for _, u := range scanned {
+		// Skip units whose availability check failed — a scan error is not the
+		// same as "no slot available", so don't count them in the fill-rate.
+		if !u.ScanOK {
+			continue
+		}
+
 		prefID := 0
 		if u.Prefecture != nil {
 			prefID = *u.Prefecture

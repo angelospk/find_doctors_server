@@ -82,6 +82,7 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 type ScannedUnit struct {
 	ministry.HUnit
 	FirstDate *string `json:"firstDate"`
+	ScanOK    bool    `json:"scanOk"` // false if the upstream availability check failed
 }
 
 // FastScanner concurrently checks the first available slot for a list of units.
@@ -112,6 +113,7 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 			p.ForeasID = unit.ForeasID
 
 			dateStr, err := a.client.FirstAvailableSlot(ctx, p)
+			scanOK := err == nil
 			var datePtr *string
 			if err == nil && len(dateStr) == 10 {
 				datePtr = &dateStr
@@ -122,6 +124,7 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 			results = append(results, ScannedUnit{
 				HUnit:     unit,
 				FirstDate: datePtr,
+				ScanOK:    scanOK,
 			})
 			mu.Unlock()
 		}(u)
