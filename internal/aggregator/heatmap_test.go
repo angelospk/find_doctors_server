@@ -322,3 +322,59 @@ func TestNationwideHeatmap_EmptyResults(t *testing.T) {
 		t.Errorf("expected 0 prefectures, got %d", len(report.Prefectures))
 	}
 }
+
+func TestNationwideHeatmap_ScanErrorExcludedFromDenominator(t *testing.T) {
+	// 3 units in the same prefecture:
+	//   h1 → scan succeeds, has slot       → available
+	//   h2 → scan succeeds, no slot        → full (nil FirstDate, ScanOK=true)
+	//   h3 → scan errors                   → must NOT count in denominator
+	// Expected AvgFillRate = (1 full / 2 successful scans) * 100 = 50.0
+	// Without fix it would be (2 nil / 3 total) * 100 = 66.7
+	pref := 5
+	h1, h2, h3 := 1, 2, 3
+
+	mockClient := &MockMinistryClient{
+		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
+			if payload.ForeasID == 1 {
+				return []ministry.HUnit{
+					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnit: &h3, Prefecture: &pref, ForeasID: 1},
+				}, nil
+			}
+			return []ministry.HUnit{}, nil
+		},
+		FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
+			if payload.HUnit == nil {
+				return "", nil
+			}
+			switch *payload.HUnit {
+			case h1:
+				return "2026-05-01", nil // slot available
+			case h2:
+				return "", nil // scan OK, no slot
+			case h3:
+				return "", errors.New("upstream timeout") // scan failed
+			}
+			return "", nil
+		},
+	}
+
+	agg := New(mockClient)
+	report, err := agg.NationwideHeatmap(context.Background(), 6)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(report.Prefectures) != 1 {
+		t.Fatalf("expected 1 prefecture, got %d", len(report.Prefectures))
+	}
+
+	got := report.Prefectures[0].AvgFillRate
+	if got != 50.0 {
+		t.Errorf("expected AvgFillRate=50.0 (scan error excluded from denominator), got %.1f", got)
+	}
+	if report.Prefectures[0].UnitCount != 2 {
+		t.Errorf("expected UnitCount=2 (only successful scans), got %d", report.Prefectures[0].UnitCount)
+	}
+}

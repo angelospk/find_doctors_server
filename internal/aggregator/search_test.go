@@ -146,6 +146,53 @@ func TestAggregator_FastScanner(t *testing.T) {
 	if missing == nil {
 		t.Error("Expected one result with nil FirstDate")
 	}
+	// Both scans succeeded (no error) → ScanOK must be true for both
+	for _, r := range results {
+		if !r.ScanOK {
+			t.Errorf("Expected ScanOK=true for unit %d (no error returned)", *r.HUnit.HUnit)
+		}
+	}
+}
+
+func TestAggregator_FastScanner_ScanError(t *testing.T) {
+	h1, h2 := 100, 200
+	mockClient := &MockMinistryClient{
+		FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
+			if *payload.HUnit == h2 {
+				return "", errors.New("upstream timeout")
+			}
+			return "2026-05-07", nil
+		},
+	}
+
+	agg := New(mockClient)
+	units := []ministry.HUnit{
+		{HUnit: &h1, Name: "OK Unit", ForeasID: 1},
+		{HUnit: &h2, Name: "Error Unit", ForeasID: 1},
+	}
+	results := agg.FastScanner(context.Background(), units, ministry.SearchPayload{})
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	var ok, fail *ScannedUnit
+	for i := range results {
+		if *results[i].HUnit.HUnit == h1 {
+			ok = &results[i]
+		} else {
+			fail = &results[i]
+		}
+	}
+
+	if ok == nil || !ok.ScanOK {
+		t.Error("expected ScanOK=true for unit that succeeded")
+	}
+	if fail == nil || fail.ScanOK {
+		t.Error("expected ScanOK=false for unit that errored")
+	}
+	if fail != nil && fail.FirstDate != nil {
+		t.Error("expected FirstDate=nil for errored unit")
+	}
 }
 
 func TestAggregator_GetSpecialties(t *testing.T) {
