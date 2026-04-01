@@ -110,10 +110,10 @@ func TestHandleNationwideHeatmap_Success(t *testing.T) {
 		t.Errorf("expected SpecialtyID=6, got %d", report.SpecialtyID)
 	}
 	if report.Prefectures == nil {
-		t.Error("expected non-nil Prefectures slice")
+		t.Fatal("expected non-nil Prefectures slice")
 	}
 	if len(report.Prefectures) == 0 {
-		t.Error("expected at least one prefecture in response")
+		t.Fatal("expected at least one prefecture in response")
 	}
 	// Both units have slots → AvgFillRate should be 0
 	if report.Prefectures[0].AvgFillRate != 0.0 {

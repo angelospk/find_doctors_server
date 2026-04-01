@@ -90,7 +90,10 @@ func (a *Aggregator) NationwideHeatmap(ctx context.Context, specialtyID int) (He
 	}
 
 	sort.Slice(prefectures, func(i, j int) bool {
-		return prefectures[i].AvgFillRate < prefectures[j].AvgFillRate
+		if prefectures[i].AvgFillRate != prefectures[j].AvgFillRate {
+			return prefectures[i].AvgFillRate < prefectures[j].AvgFillRate
+		}
+		return prefectures[i].PrefectureID < prefectures[j].PrefectureID
 	})
 
 	return HeatmapReport{
