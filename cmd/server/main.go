@@ -23,6 +23,7 @@ func main() {
 	mux.HandleFunc("/api/specialties", server.HandleGetSpecialties)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/capacity", server.HandleHospitalCapacity)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/slots", server.HandleGranularSlots)
+	mux.HandleFunc("GET /api/heatmap", server.HandleNationwideHeatmap)
 
 	log.Println("Aggregator backend server listening on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
