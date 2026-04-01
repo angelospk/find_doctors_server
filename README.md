@@ -1,6 +1,8 @@
 # FindDoctors Aggregator Server (Golang) 🏥
 
-A high-performance, type-safe backend aggregator for the Hellenic Health Appointment System (`finddoctors.gov.gr`). 
+A high-performance, type-safe backend aggregator for the Hellenic Health Appointment System (`finddoctors.gov.gr`).
+
+> **Note:** Requires Go 1.21+ to build.
 
 ## Overview
 This server acts as a specialized proxy that fixes the primary limitation of the official health portal: the inability to search across different entities (Public Hospitals vs. Primary Care Centers) and regions simultaneously.
