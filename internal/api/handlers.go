@@ -169,6 +169,30 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(report)
 }
 
+// HandleNationwideHeatmap returns a prefecture-level fill-rate heatmap for a given specialty.
+// GET /api/heatmap?specialtyId=X
+func (s *Server) HandleNationwideHeatmap(w http.ResponseWriter, r *http.Request) {
+	specIDStr := r.URL.Query().Get("specialtyId")
+	if specIDStr == "" {
+		http.Error(w, "missing specialtyId", http.StatusBadRequest)
+		return
+	}
+	specialtyID, err := strconv.Atoi(specIDStr)
+	if err != nil {
+		http.Error(w, "invalid specialtyId: must be an integer", http.StatusBadRequest)
+		return
+	}
+
+	report, err := s.agg.NationwideHeatmap(r.Context(), specialtyID)
+	if err != nil {
+		http.Error(w, "heatmap generation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
 // HandleGranularSlots returns detailed appointment slots for a specific unit and date.
 // Example: GET /api/hunits/21/slots?specialtyId=12&date=2026-03-26&prefectureId=5&foreasId=1
 func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
