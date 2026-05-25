@@ -320,7 +320,7 @@ func TestAggregator_GetGranularSlots(t *testing.T) {
 	agg := New(mockClient)
 	ctx := context.Background()
 
-	slots, err := agg.GetGranularSlots(ctx, hUnitID, foreasID, nil, specID, date)
+	slots, err := agg.GetGranularSlots(ctx, hUnitID, foreasID, nil, specID, date, GranularSlotsOptions{})
 	if err != nil {
 		t.Fatalf("GetGranularSlots failed: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestAggregator_GetGranularSlots_WithComments(t *testing.T) {
 	ctx := context.Background()
 
 	// Monday, 2026-03-23
-	slots, err := agg.GetGranularSlots(ctx, 123, 1, nil, 1, "2026-03-23")
+	slots, err := agg.GetGranularSlots(ctx, 123, 1, nil, 1, "2026-03-23", GranularSlotsOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get slots: %v", err)
 	}
