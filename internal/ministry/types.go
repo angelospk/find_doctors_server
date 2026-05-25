@@ -44,29 +44,34 @@ type DaySlots struct {
 
 // SearchPayload represents the outgoing JSON body for searches and availability.
 type SearchPayload struct {
-	StartDate    string `json:"startDate"`
-	EndDate      string `json:"endDate"`
-	PrefectureID *int   `json:"prefectureID"`
-	SpecialityID int    `json:"specialityID"`
-	ForeasID     int    `json:"foreasID"`
-	HUnit        *int   `json:"hunit"`
-	CDoorID      *int   `json:"cDoorId"`
-	IsCovid      int    `json:"isCovid"`
-	IsOnlyFd     int    `json:"isOnlyFd"`
-	IsMachine    int    `json:"isMachine"`
+	StartDate      string `json:"startDate"`
+	EndDate        string `json:"endDate"`
+	PrefectureID   *int   `json:"prefectureID"`
+	SpecialityID   int    `json:"specialityID"`
+	ForeasID       int    `json:"foreasID"`
+	HUnit          *int   `json:"hunit"`
+	CDoorID        *int   `json:"cDoorId"`
+	IsCovid        int    `json:"isCovid"`
+	IsOnlyFd       int    `json:"isOnlyFd"`
+	IsMachine      int    `json:"isMachine"`
+	IsMentalHealth int    `json:"isMentalHealth,omitempty"`
+	RvTypeID       int    `json:"rvtypeId,omitempty"`
 }
 
 // SlotsInitPayload represents the request body for /rv/getslotsinit.
 type SlotsInitPayload struct {
-	StartDate    string `json:"startDate"`
-	EndDate      string `json:"endDate"`
-	SpecialityID int    `json:"specialityID"`
-	PrefectureID *int   `json:"prefectureID"`
-	HUnit        *int   `json:"hunit"`
-	ForeasID     int    `json:"foreasID"`
-	IsCovid      int    `json:"isCovid"`
-	IsOnlyFd     int    `json:"isOnlyFd"`
-	IsMachine    int    `json:"isMachine"`
+	StartDate      string `json:"startDate"`
+	EndDate        string `json:"endDate"`
+	SpecialityID   int    `json:"specialityID"`
+	PrefectureID   *int   `json:"prefectureID"`
+	HUnit          *int   `json:"hunit"`
+	ForeasID       int    `json:"foreasID"`
+	CDoorID        *int   `json:"cDoorId,omitempty"`
+	IsCovid        int    `json:"isCovid"`
+	IsOnlyFd       int    `json:"isOnlyFd"`
+	IsMachine      int    `json:"isMachine"`
+	IsMentalHealth int    `json:"isMentalHealth,omitempty"`
+	RvTypeID       int    `json:"rvtypeId,omitempty"`
 }
 
 // SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
@@ -81,15 +86,15 @@ type SlotGroup struct {
 // ActualSlot represents a specific, granular appointment returned by /rv/getactualslots.
 // tygo:generate
 type ActualSlot struct {
-	HUnitID int    `json:"hUnitId"`
-	RVDate  string `json:"rvDate"`
-	RVTime  string `json:"rvtime"`
-	DocName   string `json:"doc_name"`
-	Address   string `json:"address"`
-	City      string `json:"city"`
+	HUnitID   int     `json:"hUnitId"`
+	RVDate    string  `json:"rvDate"`
+	RVTime    string  `json:"rvtime"`
+	DocName   string  `json:"doc_name"`
+	Address   string  `json:"address"`
+	City      string  `json:"city"`
 	Comments  *string `json:"comments"`
 	Comments2 *string `json:"comments2"`
-	RVTName   string `json:"rvtname"`
+	RVTName   string  `json:"rvtname"`
 }
 
 // GetActualSlotsPayload represents the request body for /rv/getactualslots.
@@ -104,4 +109,72 @@ type GetActualSlotsPayload struct {
 	IsOnlyFd     int    `json:"isOnlyFd"`
 	IsMachine    int    `json:"isMachine"`
 	CDoorID      *int   `json:"cDoorId"`
+}
+
+// HealthUnitType represents a foreas/unit-type metadata entry from /gen/getHealthUnitTypes/.
+// tygo:generate
+type HealthUnitType struct {
+	HUnitType int    `json:"hUnitType"`
+	Name      string `json:"name"`
+	IsActive  int    `json:"isActive"`
+}
+
+// Prefecture represents a Greek prefecture from /gen/getprefectures.
+// tygo:generate
+type Prefecture struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	ResponseCode int    `json:"responseCode,omitempty"`
+}
+
+// Doctor represents a named physician returned by /rv/searchdoctors.
+// tygo:generate
+type Doctor struct {
+	FirstName     string   `json:"firstName"`
+	LastName      string   `json:"lastName"`
+	Amka          string   `json:"amka"`
+	SpecialtyID   *int     `json:"specialtyId"`
+	SpecialtyName string   `json:"specialtyName"`
+	Address       string   `json:"address"`
+	CityName      string   `json:"cityName"`
+	Zip           string   `json:"zip"`
+	Phone         *string  `json:"phone"`
+	Latitude      float64  `json:"lattitude"`
+	Longitude     float64  `json:"longitude"`
+	Distance      *float64 `json:"distance"`
+	ForeasID      int      `json:"foreasId"`
+	ResponseCode  int      `json:"responseCode"`
+}
+
+// SearchDoctorsPayload is the JSON body for /rv/searchdoctors and variants.
+type SearchDoctorsPayload struct {
+	PrefectureID   *int     `json:"prefectureID"`
+	SpecialityID   int      `json:"specialityID"`
+	ForeasID       int      `json:"foreasID"`
+	Latitude       *float64 `json:"lattitude,omitempty"`
+	Longitude      *float64 `json:"longitude,omitempty"`
+	Distance       *float64 `json:"distance,omitempty"`
+	IsOnlyFd       int      `json:"isOnlyFd"`
+	IsCovid        int      `json:"isCovid"`
+	IsMachine      int      `json:"isMachine"`
+	IsMentalHealth int      `json:"isMentalHealth,omitempty"`
+	RvTypeID       int      `json:"rvtypeId,omitempty"`
+	FirstName      string   `json:"firstName,omitempty"`
+	LastName       string   `json:"lastName,omitempty"`
+}
+
+// ClinicDoor represents an entry from /gen/cdoorsbyhunitspeciality.
+// tygo:generate
+type ClinicDoor struct {
+	CDoorID int    `json:"cDoorId"`
+	Name    string `json:"name"`
+}
+
+// MachineRvType describes a diagnostic-machine RV type entry.
+// tygo:generate
+type MachineRvType struct {
+	RvTypeID  int    `json:"rvTypeId"`
+	Name      string `json:"name"`
+	PayType   int    `json:"payType"`
+	IsMachine int    `json:"isMachine"`
 }
