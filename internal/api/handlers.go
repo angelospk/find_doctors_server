@@ -36,6 +36,55 @@ type SearchResponse struct {
 	Results []aggregator.ScannedUnit `json:"results"`
 }
 
+// requireInt extracts a required integer query parameter. If absent or unparseable,
+// it writes a structured JSON 400 to w and returns ok=false. Callers should
+// return immediately when ok is false.
+func requireInt(w http.ResponseWriter, r *http.Request, name string) (int, bool) {
+	s := r.URL.Query().Get(name)
+	if s == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing_param", "missing "+name)
+		return 0, false
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", name+" must be an integer")
+		return 0, false
+	}
+	return v, true
+}
+
+// pagination returns (limit, offset) clamped to safe bounds, defaulting to
+// limit=50, offset=0. limit is capped at 200 to keep response sizes reasonable.
+func pagination(r *http.Request) (limit, offset int) {
+	limit = 50
+	offset = 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	return limit, offset
+}
+
+func paginate[T any](xs []T, limit, offset int) []T {
+	if offset >= len(xs) {
+		return []T{}
+	}
+	end := offset + limit
+	if end > len(xs) {
+		end = len(xs)
+	}
+	return xs[offset:end]
+}
+
 func parseIntPtr(s string) *int {
 	if s == "" {
 		return nil
@@ -87,7 +136,8 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	units, err := s.agg.SearchUnified(ctx, payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "search failed: "+err.Error())
+		s.logger.Warn("smart search upstream failed", "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 
@@ -97,14 +147,20 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		MaxDistance: maxDist,
 	})
 
-	writeJSON(w, http.StatusOK, results)
+	limit, offset := pagination(r)
+	page := paginate(results, limit, offset)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": page,
+		"meta": map[string]any{"total": len(results), "limit": limit, "offset": offset},
+	})
 }
 
 // HandleGetSpecialties returns the cached list of medical specialties.
 func (s *Server) HandleGetSpecialties(w http.ResponseWriter, r *http.Request) {
 	specs, err := s.agg.GetSpecialties(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch specialties: "+err.Error())
+		s.logger.Warn("specialties fetch failed", "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch specialties")
 		return
 	}
 	writeJSON(w, http.StatusOK, specs)
@@ -133,7 +189,8 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 
 	specs, err := s.agg.GetSpecialties(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch specialties: "+err.Error())
+		s.logger.Warn("specialties fetch failed", "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch specialties")
 		return
 	}
 
@@ -161,7 +218,8 @@ func (s *Server) HandleHospitalCapacity(w http.ResponseWriter, r *http.Request) 
 
 	report, err := s.agg.HospitalCapacity(r.Context(), hunitID, foreasID, prefPtr, filteredSpecs)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to generate capacity report: "+err.Error())
+		s.logger.Warn("capacity report failed", "hunit", hunitID, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to generate capacity report")
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
@@ -220,7 +278,8 @@ func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
 		TimeOfDay: timeOfDay,
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch granular slots: "+err.Error())
+		s.logger.Warn("granular slots failed", "hunit", hunitID, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch granular slots")
 		return
 	}
 	writeJSON(w, http.StatusOK, slots)
@@ -252,7 +311,8 @@ func (s *Server) HandleHealthUnitTypes(w http.ResponseWriter, r *http.Request) {
 	}
 	types, err := dc.GetHealthUnitTypes(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, types)
@@ -267,7 +327,8 @@ func (s *Server) HandlePrefectures(w http.ResponseWriter, r *http.Request) {
 	}
 	prefs, err := dc.GetPrefectures(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, prefs)
@@ -282,7 +343,8 @@ func (s *Server) HandleCovidPrefectures(w http.ResponseWriter, r *http.Request) 
 	}
 	prefs, err := dc.GetCovidPrefectures(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, prefs)
@@ -297,7 +359,8 @@ func (s *Server) HandleMentalHealthPrefectures(w http.ResponseWriter, r *http.Re
 	}
 	prefs, err := dc.GetMentalHealthPrefectures(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, prefs)
@@ -322,21 +385,37 @@ func (s *Server) HandleDoctorSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	now := time.Now().UTC()
+	firstName, ok := aggregator.SanitizeName(r.URL.Query().Get("firstName"))
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", "firstName exceeds 100 characters")
+		return
+	}
+	lastName, ok := aggregator.SanitizeName(r.URL.Query().Get("lastName"))
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", "lastName exceeds 100 characters")
+		return
+	}
 	payload := ministry.SearchDoctorsPayload{
 		StartDate:    now.Format("2006-01-02T15:04:05.000Z"),
 		EndDate:      now.AddDate(0, 6, 0).Format("2006-01-02T15:04:05.000Z"),
 		SpecialityID: specID,
 		ForeasID:     foreasID,
 		PrefectureID: parseIntPtr(r.URL.Query().Get("prefectureId")),
-		FirstName:    r.URL.Query().Get("firstName"),
-		LastName:     r.URL.Query().Get("lastName"),
+		FirstName:    firstName,
+		LastName:     lastName,
 	}
 	docs, err := dc.SearchDoctors(r.Context(), payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, docs)
+	limit, offset := pagination(r)
+	page := paginate(docs, limit, offset)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": page,
+		"meta": map[string]any{"total": len(docs), "limit": limit, "offset": offset},
+	})
 }
 
 // HandleDoctorNearby wraps /rv/searchdoctors/currentlocation (#19).
@@ -376,7 +455,8 @@ func (s *Server) HandleDoctorNearby(w http.ResponseWriter, r *http.Request) {
 	}
 	docs, err := dc.SearchDoctorsByLocation(r.Context(), payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, docs)
@@ -457,7 +537,8 @@ func (s *Server) HandleCovidSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	units, err := s.agg.Client().SearchHUnits(r.Context(), payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, units)
@@ -494,7 +575,8 @@ func (s *Server) HandleMentalHealthSearch(w http.ResponseWriter, r *http.Request
 	}
 	units, err := s.agg.Client().SearchHUnits(r.Context(), payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, units)
@@ -509,7 +591,8 @@ func (s *Server) HandleMachineRvTypes(w http.ResponseWriter, r *http.Request) {
 	}
 	types, err := dc.GetMachineRvTypes(r.Context())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, types)
@@ -540,7 +623,8 @@ func (s *Server) HandleMachineSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	units, err := dc.SearchHunitsMachines(r.Context(), payload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -568,7 +652,8 @@ func (s *Server) HandleClinicDoors(w http.ResponseWriter, r *http.Request) {
 	}
 	doors, err := dc.GetClinicDoors(r.Context(), hunitID, specID)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", err.Error())
+		s.logger.Warn("upstream ministry call failed", "path", r.URL.Path, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, doors)
