@@ -34,7 +34,9 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.HandleHealthz)
+	mux.HandleFunc("GET /livez", server.HandleHealthz)
 	mux.HandleFunc("GET /readyz", server.HandleReadyz)
+	mux.HandleFunc("GET /healthz/upstream", server.HandleUpstreamHealth)
 
 	mux.HandleFunc("GET /api/search", server.HandleSmartSearch)
 	mux.HandleFunc("GET /api/specialties", server.HandleGetSpecialties)
@@ -55,6 +57,10 @@ func main() {
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/capacity", server.HandleHospitalCapacity)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/slots", server.HandleGranularSlots)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/doors", server.HandleClinicDoors)
+
+	// JSON catch-all so unknown routes get the standard error envelope instead
+	// of Go's default plain-text "404 page not found".
+	mux.HandleFunc("/", api.JSONNotFoundHandler)
 
 	corsCfg := api.CORSConfig{
 		AllowedOrigins: corsOrigins(),

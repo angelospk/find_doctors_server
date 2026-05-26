@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/angelospk/find_doctors_server/internal/ministry"
 )
 
 // ParseFlexibleDate accepts the date formats observed in callers:
@@ -72,4 +74,49 @@ func SanitizeName(s string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// hasUsableHUnitID reports whether a raw hunitId JSON value identifies a real
+// upstream record. The Ministry returns placeholders with hunitId of literal
+// null, "" or "0" — those entries cannot be followed up via /capacity or
+// /slots, so we drop them.
+func hasUsableHUnitID(raw []byte) bool {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return false
+	}
+	// Strip wrapping quotes if it's a JSON string.
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" || s == "0" {
+		return false
+	}
+	return true
+}
+
+// FilterSearchUnits applies the API-level guarantees that the public endpoints
+// promise: inactive units, the placeholder responseCode=2 row, and entries
+// with missing/empty/null/"0" hunitId are dropped. Address fields are also
+// trimmed of stray whitespace. Used by every handler that surfaces HUnit
+// results to clients (#qa-1, #qa-3, #qa-14).
+func FilterSearchUnits(units []ministry.HUnit) []ministry.HUnit {
+	out := make([]ministry.HUnit, 0, len(units))
+	for _, u := range units {
+		if u.IsActive != nil && *u.IsActive == 0 {
+			continue
+		}
+		if IsPlaceholder(u.ResponseCode) {
+			continue
+		}
+		if !hasUsableHUnitID(u.HUnitID) {
+			continue
+		}
+		u.Address = strings.TrimSpace(u.Address)
+		u.Name = strings.TrimSpace(u.Name)
+		u.City = strings.TrimSpace(u.City)
+		out = append(out, u)
+	}
+	return out
 }

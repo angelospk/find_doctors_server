@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"time"
 )
@@ -35,7 +36,7 @@ func NewClient(baseURL string) *Client {
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 		cache:      NewTTLCache(),
 		sf:         newSingleflight(),
-		MaxRetries: 3,
+		MaxRetries: 2,
 		RetryWait:  200 * time.Millisecond,
 	}
 }
@@ -191,7 +192,12 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 
 		// Backoff before next attempt (unless this was the last).
 		if attempt < max-1 {
-			delay := wait * time.Duration(1<<attempt)
+			apiRetries.WithLabelValues(endpoint).Inc()
+			// Jittered backoff: base ± 25% so concurrent clients don't
+			// retry in lockstep against a recovering upstream.
+			base := wait * time.Duration(1<<attempt)
+			jitter := time.Duration(rand.Int63n(int64(base)/2 + 1))
+			delay := base - base/4 + jitter
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

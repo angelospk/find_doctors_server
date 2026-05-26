@@ -1,9 +1,52 @@
 package aggregator
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/angelospk/find_doctors_server/internal/ministry"
 )
+
+func TestFilterSearchUnits(t *testing.T) {
+	zero := 0
+	one := 1
+	raw := func(s string) json.RawMessage { return json.RawMessage(s) }
+	in := []ministry.HUnit{
+		{HUnitID: raw(`"081"`), IsActive: &one, ResponseCode: 0, Name: "  Good "},
+		{HUnitID: raw(`null`), IsActive: &one, ResponseCode: 0, Name: "null id"},
+		{HUnitID: raw(`""`), IsActive: &one, ResponseCode: 0, Name: "empty id"},
+		{HUnitID: raw(`"0"`), IsActive: &one, ResponseCode: 0, Name: "zero id"},
+		{HUnitID: raw(`"081"`), IsActive: &zero, ResponseCode: 0, Name: "inactive"},
+		{HUnitID: raw(`"081"`), IsActive: &one, ResponseCode: 2, Name: "placeholder"},
+		{HUnitID: raw(`"99"`), IsActive: &one, ResponseCode: 0, Name: "Keep", Address: "  3 km road  "},
+	}
+	out := FilterSearchUnits(in)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 units kept, got %d (%+v)", len(out), out)
+	}
+	if out[0].Name != "Good" {
+		t.Errorf("name not trimmed: %q", out[0].Name)
+	}
+	if out[1].Address != "3 km road" {
+		t.Errorf("address not trimmed: %q", out[1].Address)
+	}
+}
+
+func TestHasUsableHUnitID(t *testing.T) {
+	good := []string{`"081"`, `"00081"`, `12345`, `"abc"`}
+	bad := []string{``, `null`, `""`, `"0"`, `"  "`}
+	for _, s := range good {
+		if !hasUsableHUnitID([]byte(s)) {
+			t.Errorf("expected usable: %q", s)
+		}
+	}
+	for _, s := range bad {
+		if hasUsableHUnitID([]byte(s)) {
+			t.Errorf("expected unusable: %q", s)
+		}
+	}
+}
 
 func TestParseFlexibleDate(t *testing.T) {
 	cases := []struct {
