@@ -5,16 +5,25 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/angelospk/find_doctors_server/internal/aggregator"
 	"github.com/angelospk/find_doctors_server/internal/ministry"
 )
 
+// upstreamHealthTTL controls how long /healthz/upstream caches a successful
+// probe. Failures are not cached so recovery is observed immediately.
+const upstreamHealthTTL = 30 * time.Second
+
 // Server represents our REST API HTTP server.
 type Server struct {
 	agg    *aggregator.Aggregator
 	logger *slog.Logger
+
+	upHealthMu sync.Mutex
+	upHealthOK bool
+	upHealthAt time.Time
 }
 
 // NewServer initializes a new Server instance.
@@ -254,6 +263,10 @@ func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing_param", "missing date in query")
 		return
 	}
+	if _, derr := aggregator.ParseFlexibleDate(date); derr != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", "date must be YYYY-MM-DD or RFC3339")
+		return
+	}
 
 	foreasID := 1
 	if fStr := r.URL.Query().Get("foreasId"); fStr != "" {
@@ -282,6 +295,9 @@ func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch granular slots")
 		return
 	}
+	if slots == nil {
+		slots = []aggregator.GranularSlot{}
+	}
 	writeJSON(w, http.StatusOK, slots)
 }
 
@@ -290,16 +306,48 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// HandleReadyz performs a live, cache-bypassing upstream reachability check so
-// readiness reflects the ministry API's true state rather than a stale 24h cache.
+// HandleReadyz reports whether the process is ready to serve traffic. It does
+// NOT depend on the Ministry API being reachable — that's intentional. K8s
+// readiness should not flap when an external dependency hiccups; clients
+// learn about upstream failures from the per-request 502s. Use
+// /healthz/upstream to surface Ministry reachability separately.
 func (s *Server) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+// HandleUpstreamHealth reports Ministry API reachability with a short TTL
+// cache so admin tooling can poll without amplifying load. Probes use a 3s
+// timeout so a wedged upstream doesn't hang the check.
+func (s *Server) HandleUpstreamHealth(w http.ResponseWriter, r *http.Request) {
+	s.upHealthMu.Lock()
+	cached := s.upHealthOK
+	age := time.Since(s.upHealthAt)
+	s.upHealthMu.Unlock()
+	if cached && age < upstreamHealthTTL {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"upstream":   "up",
+			"checked_at": s.upHealthAt.UTC().Format(time.RFC3339),
+			"cached":     true,
+		})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
+	// Use the cache-bypassing Ready() probe (not the 24h-cached GetSpecialties)
+	// so /healthz/upstream reflects the ministry API's true reachability.
 	if err := s.agg.Ready(ctx); err != nil {
+		s.upHealthMu.Lock()
+		s.upHealthOK = false
+		s.upHealthAt = time.Now()
+		s.upHealthMu.Unlock()
 		writeJSONError(w, http.StatusServiceUnavailable, "upstream_unavailable", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	s.upHealthMu.Lock()
+	s.upHealthOK = true
+	s.upHealthAt = time.Now()
+	s.upHealthMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"upstream": "up", "cached": false})
 }
 
 // HandleHealthUnitTypes returns the foreas/health-unit-types catalog (#17).
@@ -470,10 +518,17 @@ func (s *Server) HandleFamilyDoctorSearch(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusNotImplemented, "feature_unavailable", "extended ministry client not wired")
 		return
 	}
-	specID, err := strconv.Atoi(r.URL.Query().Get("specialtyId"))
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_param", "specialtyId required")
-		return
+	// Family-doctor mode only has one effective specialty (ΓΕΝΙΚΗ/ΟΙΚΟΓΕΝΕΙΑΚΗ
+	// ΙΑΤΡΙΚΗ, id=4). Default to it if the caller omits specialtyId.
+	const familyDoctorSpecialtyID = 4
+	specID := familyDoctorSpecialtyID
+	if v := r.URL.Query().Get("specialtyId"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_param", "specialtyId must be an integer")
+			return
+		}
+		specID = n
 	}
 	prefPtr := parseIntPtr(r.URL.Query().Get("prefectureId"))
 
@@ -501,10 +556,15 @@ func (s *Server) HandleFamilyDoctorSearch(w http.ResponseWriter, r *http.Request
 	docs, dErr := dc.SearchDoctorsFD(r.Context(), docsPayload)
 	units, uErr := dc.SearchHunitsFD(r.Context(), unitsPayload)
 	if dErr != nil && uErr != nil {
-		writeJSONError(w, http.StatusBadGateway, "upstream_failure", dErr.Error())
+		s.logger.Warn("family-doctor upstream calls failed",
+			"docs_err", dErr, "units_err", uErr, "path", r.URL.Path)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"doctors": docs, "units": units})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"doctors": docs,
+		"units":   aggregator.FilterSearchUnits(units),
+	})
 }
 
 // HandleCovidSearch wraps /rv/searchhunits with isCovid=1 (#14).
@@ -541,7 +601,7 @@ func (s *Server) HandleCovidSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, units)
+	writeJSON(w, http.StatusOK, aggregator.FilterSearchUnits(units))
 }
 
 // HandleMentalHealthSearch sets rvtypeId=15 + isMentalHealth=1 (#13).
@@ -579,7 +639,7 @@ func (s *Server) HandleMentalHealthSearch(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, units)
+	writeJSON(w, http.StatusOK, aggregator.FilterSearchUnits(units))
 }
 
 // HandleMachineRvTypes returns the diagnostic-machine RV type catalog (#15).

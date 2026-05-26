@@ -136,15 +136,7 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 				return
 			}
 			a.logger.Debug("foreas search result", "foreas_id", id, "count", len(units))
-			for _, u := range units {
-				if u.IsActive != nil && *u.IsActive == 0 {
-					continue
-				}
-				if IsPlaceholder(u.ResponseCode) {
-					continue
-				}
-				allUnits = append(allUnits, u)
-			}
+			allUnits = append(allUnits, FilterSearchUnits(units)...)
 		}(fID)
 	}
 
@@ -189,6 +181,14 @@ func (a *Aggregator) activeForeasIDs(ctx context.Context, fallback []int) []int 
 		out = fallback
 	}
 	a.foreasMu.Lock()
+	// Re-check under the write lock: a concurrent caller may have refreshed
+	// the cache while we were waiting on upstream. Prefer the existing entry
+	// so we don't trample a fresher snapshot.
+	if time.Now().Before(a.foreasExpires) && len(a.foreasCache) > 0 {
+		cached := a.foreasCache
+		a.foreasMu.Unlock()
+		return cached
+	}
 	a.foreasCache = out
 	a.foreasExpires = time.Now().Add(24 * time.Hour)
 	a.foreasMu.Unlock()

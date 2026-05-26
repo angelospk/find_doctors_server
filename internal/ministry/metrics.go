@@ -29,6 +29,11 @@ var (
 		Name: "ministry_cache_misses_total",
 		Help: "Cache lookups that fell through to upstream.",
 	}, []string{"key"})
+
+	apiRetries = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "ministry_api_retries_total",
+		Help: "Retry attempts triggered by a retryable upstream status.",
+	}, []string{"endpoint"})
 )
 
 // observeCacheHit / observeCacheMiss are thin wrappers used at the call sites.

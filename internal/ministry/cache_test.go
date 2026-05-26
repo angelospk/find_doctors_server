@@ -59,6 +59,7 @@ func TestClient_RetriesTransient5xx(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	c.RetryWait = 5 * time.Millisecond
+	c.MaxRetries = 3 // override default (2) so this test can verify two retries
 	if _, err := c.GetSpecialties(context.Background()); err != nil {
 		t.Fatalf("expected eventual success, got error: %v", err)
 	}
