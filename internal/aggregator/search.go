@@ -105,8 +105,13 @@ func (a *Aggregator) Ready(ctx context.Context) error {
 }
 
 // SearchUnified runs searches across active foreas types concurrently and merges results.
+// Units flagged inactive by the Ministry (IsActive == 0) are dropped so the
+// frontend never has to decide whether to show them.
 func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 	foreasIDs := a.activeForeasIDs(ctx, []int{1, 18})
+	if len(foreasIDs) == 0 {
+		return []ministry.HUnit{}, nil
+	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -131,7 +136,15 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 				return
 			}
 			a.logger.Debug("foreas search result", "foreas_id", id, "count", len(units))
-			allUnits = append(allUnits, units...)
+			for _, u := range units {
+				if u.IsActive != nil && *u.IsActive == 0 {
+					continue
+				}
+				if IsPlaceholder(u.ResponseCode) {
+					continue
+				}
+				allUnits = append(allUnits, u)
+			}
 		}(fID)
 	}
 
@@ -305,12 +318,9 @@ type GranularSlotsOptions struct {
 
 // GetGranularSlots fetches and flattens all available appointment times for a unit on a given date.
 func (a *Aggregator) GetGranularSlots(ctx context.Context, hunitID, foreasID int, prefID *int, specialtyID int, date string, opts GranularSlotsOptions) ([]GranularSlot, error) {
-	parsedDate, err := time.Parse(time.RFC3339, date)
+	parsedDate, err := ParseFlexibleDate(date)
 	if err != nil {
-		parsedDate, err = time.Parse("2006-01-02", date)
-		if err != nil {
-			return nil, fmt.Errorf("invalid date format: %w", err)
-		}
+		return nil, fmt.Errorf("invalid date format: %w", err)
 	}
 
 	startDay := parsedDate.Truncate(24 * time.Hour)
@@ -470,17 +480,13 @@ type CapacityReport struct {
 }
 
 // HospitalCapacity aggregates capacity across all specialties for a unit.
+// The weekly window is computed in Europe/Athens so late-Sunday UTC traffic
+// gets the upcoming Monday-Sunday window, not the one that just ended.
 func (a *Aggregator) HospitalCapacity(ctx context.Context, hunitID, foreasID int, prefID *int, specialties []ministry.Specialty) (CapacityReport, error) {
-	now := time.Now().UTC()
-	offset := 8 - int(now.Weekday())
-	if offset > 7 {
-		offset = 1
-	}
-	monday := now.AddDate(0, 0, offset).Truncate(24 * time.Hour)
-	sunday := monday.AddDate(0, 0, 6)
+	monday, sunday := WeekWindow(time.Now())
 
-	startStr := monday.Format("2006-01-02T15:04:05.000Z")
-	endStr := sunday.Format("2006-01-02T15:04:05.000Z")
+	startStr := monday.UTC().Format("2006-01-02T15:04:05.000Z")
+	endStr := sunday.UTC().Format("2006-01-02T15:04:05.000Z")
 
 	report := CapacityReport{
 		HUnitID:     hunitID,

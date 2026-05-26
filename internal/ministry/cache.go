@@ -27,15 +27,22 @@ func NewTTLCache() *TTLCache {
 	}
 }
 
-// Get returns the cached value if present and not expired.
+// Get returns the cached value if present and not expired. Expired entries are
+// removed lazily so the map does not grow unbounded over time.
 func (c *TTLCache) Get(key string) (any, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	e, ok := c.data[key]
+	c.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
 	if c.now().After(e.expires) {
+		c.mu.Lock()
+		// Re-check under the write lock — another goroutine may have refreshed it.
+		if e2, ok := c.data[key]; ok && c.now().After(e2.expires) {
+			delete(c.data, key)
+		}
+		c.mu.Unlock()
 		return nil, false
 	}
 	return e.value, true

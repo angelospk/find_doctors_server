@@ -39,7 +39,13 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 
 func newRequestID() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fall back to nanosecond timestamp so we never return an all-zero ID.
+		ts := time.Now().UnixNano()
+		for i := 0; i < 8; i++ {
+			b[i] = byte(ts >> (i * 8))
+		}
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -143,9 +149,11 @@ func CORSMiddleware(cfg CORSConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
+			// Always advertise Vary: Origin so caching layers do not serve a
+			// response generated for origin A back to origin B.
+			w.Header().Set("Vary", "Origin")
 			if allow := cfg.allowedOrigin(origin); allow != "" {
 				w.Header().Set("Access-Control-Allow-Origin", allow)
-				w.Header().Set("Vary", "Origin")
 				if methods != "" {
 					w.Header().Set("Access-Control-Allow-Methods", methods)
 				}
