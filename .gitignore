@@ -3,3 +3,5 @@
 openspec/
 review.txt
 server.log
+# Local security analysis of the upstream government API — never commit/publish
+review.md
