@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -61,13 +62,13 @@ func TestAggregator_SearchUnified(t *testing.T) {
 
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Name: "Hospital 1", ForeasID: 1},
-					{HUnit: &h2, Name: "Hospital 2", ForeasID: 1},
+					{HUnitID: json.RawMessage(`"100"`), HUnit: &h1, Name: "Hospital 1", ForeasID: 1},
+					{HUnitID: json.RawMessage(`"200"`), HUnit: &h2, Name: "Hospital 2", ForeasID: 1},
 				}, nil
 			} else if payload.ForeasID == 18 {
 				h3 := 300
 				return []ministry.HUnit{
-					{HUnit: &h3, Name: "PFY 1", ForeasID: 18},
+					{HUnitID: json.RawMessage(`"300"`), HUnit: &h3, Name: "PFY 1", ForeasID: 18},
 				}, nil
 			}
 			return nil, errors.New("unknown foreas")
@@ -231,9 +232,9 @@ func TestAggregator_SmartSearch(t *testing.T) {
 	h3 := 300
 
 	units := []ministry.HUnit{
-		{HUnit: &h1, Name: "Close Soon", Latitude: 37.98, Longitude: 23.72, ForeasID: 1},      // ~0km
-		{HUnit: &h2, Name: "Far Soon", Latitude: 38.24, Longitude: 21.73, ForeasID: 1},       // ~170km (Patras)
-		{HUnit: &h3, Name: "Close Late", Latitude: 37.97, Longitude: 23.73, ForeasID: 1},      // ~1km
+		{HUnit: &h1, Name: "Close Soon", Latitude: 37.98, Longitude: 23.72, ForeasID: 1}, // ~0km
+		{HUnit: &h2, Name: "Far Soon", Latitude: 38.24, Longitude: 21.73, ForeasID: 1},   // ~170km (Patras)
+		{HUnit: &h3, Name: "Close Late", Latitude: 37.97, Longitude: 23.73, ForeasID: 1}, // ~1km
 	}
 
 	mockClient := &MockMinistryClient{
@@ -275,7 +276,7 @@ func TestAggregator_SmartSearch(t *testing.T) {
 			MaxDistance: 0, // No limit
 		}
 		results := agg.SmartSearch(ctx, units, ministry.SearchPayload{}, opts)
-		
+
 		if len(results) != 3 {
 			t.Fatalf("Expected 3 results, got %d", len(results))
 		}
@@ -367,7 +368,7 @@ func TestAggregator_GetGranularSlots(t *testing.T) {
 	agg := New(mockClient)
 	ctx := context.Background()
 
-	slots, err := agg.GetGranularSlots(ctx, hUnitID, foreasID, nil, specID, date)
+	slots, err := agg.GetGranularSlots(ctx, hUnitID, foreasID, nil, specID, date, GranularSlotsOptions{})
 	if err != nil {
 		t.Fatalf("GetGranularSlots failed: %v", err)
 	}
@@ -403,15 +404,15 @@ func TestAggregator_GetGranularSlots_WithComments(t *testing.T) {
 			if payload.GroupID == 1 {
 				return []ministry.ActualSlot{
 					{
-						HUnitID: 123,
-						RVDate:  "2026-03-23T08:30:00.000+0200",
-						RVTime:  "08:30",
-						DocName: "Dr. Commentator",
-						Address: "123 Comment St",
-						City:    "Literal City",
-						Comments: func(s string) *string { return &s }("Requires medical record."),
+						HUnitID:   123,
+						RVDate:    "2026-03-23T08:30:00.000+0200",
+						RVTime:    "08:30",
+						DocName:   "Dr. Commentator",
+						Address:   "123 Comment St",
+						City:      "Literal City",
+						Comments:  func(s string) *string { return &s }("Requires medical record."),
 						Comments2: func(s string) *string { return &s }("Please arrive 15m early."),
-						RVTName: "Specialized",
+						RVTName:   "Specialized",
 					},
 				}, nil
 			}
@@ -423,7 +424,7 @@ func TestAggregator_GetGranularSlots_WithComments(t *testing.T) {
 	ctx := context.Background()
 
 	// Monday, 2026-03-23
-	slots, err := agg.GetGranularSlots(ctx, 123, 1, nil, 1, "2026-03-23")
+	slots, err := agg.GetGranularSlots(ctx, 123, 1, nil, 1, "2026-03-23", GranularSlotsOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get slots: %v", err)
 	}
