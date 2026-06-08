@@ -16,15 +16,43 @@
 - **`prefectureID` / `prefectureId`**: Ο κωδικός του Νομού. (π.χ. 5 = Αττική, 11 = Έβρος). Το `null` λειτουργεί σε κάποια endpoints για "Πανελλαδική Αναζήτηση".
 - **`specialityID` / `specialtyId` / `spec`**: Ο εσωτερικός κωδικός της ειδικότητας. (π.χ. 10 = Νευρολόγος, 12 = Ουρολόγος).
 - **`hunit` / `hunitId`**: Το μοναδικό ID της μονάδας υγείας (Νοσοκομείο ή Κέντρο Υγείας). Π.χ. 21 = Ευαγγελισμός, 718 = Π.Γ.Ν. Αλεξανδρούπολης.
-- **`foreasID` / `foreas`**: Ο τύπος του φορέα. `1` = Δημόσια Νοσοκομεία / ΕΣΥ. **Προσοχή**: `18` = ΠΦΥ (Κέντρα Υγείας / Τοπικά Ιατρεία).
+- **`foreasID` / `foreas` / `hUnitType`**: Ο τύπος του φορέα. **Πλήρης λίστα** (από `/gen/getHealthUnitTypes/`, επιβεβαιωμένο live):
+  | hUnitType | name                                  | isActive (May 2026) |
+  |-----------|---------------------------------------|---------------------|
+  | `1`       | Νοσοκομείο (ΕΣΥ)                       | 1                   |
+  | `18`      | Δημόσιες Δομές (ΠΦΥ / Κέντρα Υγείας)   | 0 *                 |
+  | `19`      | Ιδιώτες συμβεβλημένοι με ΕΟΠΥΥ         | 0 *                 |
+  | `20`      | Ιδιώτες                                | 0 *                 |
+
+  \* Το `isActive=0` σημαίνει «προσωρινά απενεργοποιημένο στο UI» — τα endpoints δουλεύουν κανονικά και επιστρέφουν δεδομένα. Ο σωστός dropdown πρέπει να καλεί `/gen/getHealthUnitTypes/` δυναμικά.
 - **`cDoorId` / `cid`**: Το ID πόρτας/ιατρείου μέσα στο νοσοκομείο (Clinic Door).
-- **`groupId`**: Οι ώρες της ημέρας χωρίζονται σε 6 τρίωρα groups (1 = 06:00-09:00, 2 = 09:00-12:00, 3 = 12:00-15:00, κ.ο.κ.).
+- **`groupId`**: Οι ώρες της ημέρας χωρίζονται σε 6 τρίωρα groups: `1=06–09`, `2=09–12`, `3=12–15`, `4=15–18`, `5=18–21`, `6=21–24`.
+- **`isOnlyFd`** (0/1): Όταν `1`, η αναζήτηση περιορίζεται σε **Οικογενειακούς/Προσωπικούς Γιατρούς**. Συνδυάζεται με τα ξεχωριστά endpoints `/rv/searchhunitsfd` και `/rv/searchdoctorsfd`.
+- **`isMachine`** (0/1): Όταν `1`, ενεργοποιείται **Search by Διαγνωστικό Μηχάνημα** (αξονικός/μαγνητικός/αιματολογικές κ.λπ.). Χρησιμοποιείται με τα `/machines/*` endpoints.
+- **`isCovid`** (0/1): Όταν `1`, αναζήτηση εμβολιαστικών κέντρων COVID. Χρησιμοποιεί ξεχωριστή λίστα νομών (`/gen/getprefecturescovid`).
+- **`isMentalHealth`** (0/1) + **`rvtypeId=15`**: Mode «Ψυχικής Υγείας». Ξεχωριστή λίστα νομών (`/gen/getprefecturesmentalhealth`).
+- **`amka`** (string): ΑΜΚΑ γιατρού. Επιστρέφεται από `/rv/searchdoctors` και χρησιμοποιείται για διαθεσιμότητα συγκεκριμένου ιδιώτη γιατρού.
+- **`day`** (0–6): Ημέρα εβδομάδας (Κυριακή=0, Δευτέρα=1, … Σάββατο=6).
 
 ---
 
 ## 2. Endpoints Ανακάλυψης (Discovery) - `GET` Requests
 
 Αυτά τα endpoints καλούνται με τη μέθοδο `GET` και συνήθως καλό είναι να αποθηκεύονται σε μια cache στον aggregator σου, καθώς σπάνια αλλάζουν. Παρόλα αυτά, χρειάζεται το header `authorization: no-auth`.
+
+### 2.0 Εύρεση τύπων μονάδας υγείας (`getHealthUnitTypes`)
+- **Method**: `GET`
+- **URL**: `https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getHealthUnitTypes/` ⚠️ **Trailing slash υποχρεωτικό** — χωρίς αυτό επιστρέφει `404`.
+- **Επιστρέφει**: Δυναμική λίστα των τύπων φορέα. Επιβεβαιωμένο live (May 2026):
+```json
+[
+  {"hUnitType":1,  "name":"Νοσοκομείο",                            "isActive":1},
+  {"hUnitType":18, "name":"Δημόσιες Δομές",                         "isActive":0},
+  {"hUnitType":19, "name":"Ιδιώτες συμβεβλημένοι με τον ΕΟΠΥΥ",     "isActive":0},
+  {"hUnitType":20, "name":"Ιδιώτες",                                "isActive":0}
+]
+```
+- **Σχόλιο**: Αυτή είναι η πηγή αλήθειας για τα `foreasID`. Παρόλο που πολλά είναι `isActive:0` στο UI, τα endpoints αναζήτησης δουλεύουν για όλα.
 
 ### 2.1 Εύρεση Ειδικοτήτων
 - **Method**: `GET`
@@ -41,6 +69,17 @@
 - **Method**: `GET`
 - **URL**: `https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getprefectures`
 - **Επιστρέφει**: Μια λίστα με τους νομούς της Ελλάδας.
+
+### 2.2.1 Φιλτραρισμένες λίστες νομών (ανά mode)
+Για ειδικά modes υπάρχουν περιορισμένες λίστες νομών (επιστρέφουν `404` χωρίς trailing slash):
+- **`GET /api/v1/gen/getprefecturescovid`** — νομοί με εμβολιαστικά κέντρα COVID.
+- **`GET /api/v1/gen/getprefecturesmentalhealth`** — νομοί με δομές Ψυχικής Υγείας.
+- **`POST /api/v1/gen/getfilteredprefectures`** / **`getfilteredspecialities`** — δυναμικά φιλτραρισμένες (επιστρέφουν 500 σε λάθος payload — χρειάζεται περαιτέρω probing).
+
+### 2.2.2 EOPYY notice (`getEOPYYShowMessage`)
+- **Method**: `GET`
+- **URL**: `https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getEOPYYShowMessage`
+- **Επιστρέφει**: `0` ή `1` (feature flag — δείχνει ένα banner στο UI για το EOPYY mode).
 
 ### 2.3 Εύρεση Ιατρείων ανά Νοσοκομείο (Clinic Doors)
 - **Method**: `GET`
@@ -73,6 +112,57 @@
   "isMachine": 0
 }
 ```
+
+### 3.1.1 Αναζήτηση Ιδιωτών Γιατρών ονομαστικά (`searchdoctors`) 🆕
+- **Τι κάνει**: Επιστρέφει **ονομαστικά γιατρούς** (όχι μονάδες) με ΑΜΚΑ, διεύθυνση, lat/lon, ειδικότητα και (όπου υπάρχει) τηλέφωνο. Είναι το πραγματικό endpoint για τους «Ιδιώτες ΕΟΠΥΥ» (`foreasID=19`) και τους Ιδιώτες (`foreasID=20`).
+- **URL**: `POST https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/searchdoctors`
+- **Παραλλαγή με location**: `POST /api/v1/rv/searchdoctors/currentlocation` (δέχεται `lattitude`, `longitude`, `distance`).
+- **Payload** (επιβεβαιωμένο):
+```json
+{
+  "startDate": "2026-05-20T00:00:00.000Z",
+  "endDate":   "2026-08-20T23:59:59.000Z",
+  "prefectureID": 5,
+  "specialityID": 12,
+  "foreasID": 19,
+  "isCovid": 0,
+  "isOnlyFd": 0,
+  "isMachine": 0
+}
+```
+- **Επιστρέφει** (απόσπασμα):
+```json
+[{
+  "firstName":"ΓΕΩΡΓΙΟΣ", "lastName":"ΒΟΥΛΓΑΡΙΔΗΣ",
+  "fathersName":"ΔΗΜΗΤΡΙΟΣ", "amka":"09057303092",
+  "specialtyName":"ΟΥΡΟΛΟΓΟΣ",
+  "address":"ΚΟΛΟΚΟΤΡΩΝΗ 2", "zip":"14232", "cityName":"ΝΕΑ ΙΩΝΙΑ",
+  "lattitude":38.03198, "longitude":23.745211,
+  "fullName":"ΒΟΥΛΓΑΡΙΔΗΣ ΓΕΩΡΓΙΟΣ, ΔΗΜΗΤΡΙΟΣ"
+}]
+```
+- **Σημείωση**: Αν δεν υπάρχουν γιατροί, γυρνά **ένα** object με `responseCode:2` και όλα τα πεδία `null` — όχι κενό array. Πρέπει να γίνει filter στον client.
+
+### 3.1.2 Αναζήτηση Οικογενειακών Γιατρών (`searchhunitsfd` / `searchdoctorsfd`) 🆕
+- **Τι κάνει**: Mode «Προσωπικός/Οικογενειακός Γιατρός» — γυρνά τους εγγεγραμμένους ΠΥ γιατρούς. Ίδια payloads με `searchhunits` / `searchdoctors` αλλά με `isOnlyFd:1`.
+- **URLs**:
+  - `POST /api/v1/rv/searchhunitsfd` — γυρνά μονάδες-δομές οικογενειακών γιατρών.
+  - `POST /api/v1/rv/searchdoctorsfd` — γυρνά ονομαστικά γιατρούς FD.
+- **Παρατήρηση**: Στο live API επιστρέφει σχετικά λίγα ή κενά results πανελλαδικά — η ευρετηρίαση είναι μάλλον per-patient (μέσω ΑΜΚΑ). Αν ο χρήστης δεν είναι logged-in, γυρνά placeholder με `responseCode:2`.
+
+### 3.1.3 Αναζήτηση Διαγνωστικών Μηχανημάτων (`machines/searchHunitsMachines`) 🆕
+- **Τι κάνει**: Mode «Διαγνωστικά / Εξετάσεις». Αντί για ειδικότητα ζητάει `rvTypeId` (τύπος εξέτασης).
+- **URLs**:
+  - `GET /api/v1/machines/getMachineRvTypes` — επιστρέφει διαθέσιμους τύπους εξετάσεων.
+  - `POST /api/v1/machines/searchHunitsMachines` — αναζήτηση μονάδων με το συγκεκριμένο μηχάνημα.
+- **`getMachineRvTypes` response** (επιβεβαιωμένο live):
+```json
+[
+  {"rvTypeId":10,"name":"Αιματολογικές Εξετάσεις","isActive":1,"payType":1,"isMachine":1},
+  {"rvTypeId":16,"name":"Απεικονιστικές Εξετάσεις","isActive":1,"payType":1,"isMachine":1}
+]
+```
+- **`payType:1`** σημαίνει ότι η εξέταση χρεώνεται (το UI δείχνει disclaimer).
 
 ### 3.2 Το Απόλυτα Γρηγορότερο Ραντεβού (`firstavailableslot`)
 - **Τι κάνει**: Αντί να ζητάς το πλήρες "ημερολόγιο" ενός νοσοκομείου, αυτό το endpoint κάνει ένα γρήγορο database query και σου επιστρέφει ΜΟΝΟ ένα String με την ημερομηνία της **πρώτης διαθέσιμης μέρας**. 
@@ -116,7 +206,12 @@
 ### 3.4 Τα Πραγματικά Ραντεβού (The "Actual Slots") - `getactualslots`
 - **Τι κάνει**: Αφού ο χρήστης επιλέξει την "μέρα" (από το `getslotsinit`), αυτό το endpoint καλείται για να φέρει τα ακριβή 10λεπτα ραντεβού (π.χ. "12:20"), την κλινική (cDoorName), τα Σχόλια και φυσικά το **Όνομα του Γιατρού** εάν είναι καταχωρημένο.
 - **ΛΑΘΟΣ ΠΟΥ ΚΑΝΑΜΕ ΠΡΙΝ**: Είναι **ΑΠΟΛΥΤΩΣ ΚΡΙΣΙΜΟ** να περνάς το `prefectureId` στο Payload (π.χ. `5`) αλλιώς ο server επιστρέφει `[]`! Επίσης, αν βάλεις `cDoorId: null`, λειτουργεί σωστά επιστρέφοντας slots για **όλα** τα ιατρεία της συγκεκριμένης ειδικότητας μέσα στο νοσοκομείο, αντί να ψάχνεις πόρτα-πόρτα.
-- **Επεξήγηση Ημέρας (`day`)**: Προσοχή, το πεδίο `day` δεν είναι η ημερομηνία, είναι η **ημέρα της εβδομάδας** (όπου Κυριακή=0, Δευτέρα=1 ... Πέμπτη=4). 
+- **Επεξήγηση Ημέρας (`day`)**: Προσοχή, το πεδίο `day` δεν είναι η ημερομηνία, είναι η **ημέρα της εβδομάδας** (όπου Κυριακή=0, Δευτέρα=1 ... Σάββατο=6).
+- **⚠️ Σημαντική σημασία του `groupColor`** (επαλήθευση 2026):
+  - `warning` = αρκετά διαθέσιμα.
+  - `danger` = περιορισμένη διαθεσιμότητα.
+  - `disabled` = **δεν υπάρχει διαθέσιμο slot ΣΕ ΑΥΤΟ ΤΟ GROUP**. Δεν σημαίνει αναγκαστικά «γεμάτο» — μπορεί απλώς να σημαίνει ότι **ο γιατρός δεν δουλεύει εκείνη τη μέρα/ώρα**. Πολλοί γιατροί έχουν ωράρια Δευ/Τετ/Παρ μόνο.
+  - **Συνέπεια για fill-rate calculations**: Το να μετράς `disabled / total` ως «πληρότητα» δίνει ψευδώς υψηλά νούμερα (π.χ. 95% «γεμάτο» όταν ο γιατρός απλά έχει 2 ημέρες/εβδομάδα). Σωστή προσέγγιση: συσχέτισε το `disabled` με ΰπαρξη αντίστοιχου `warning`/`danger` σε άλλη ημέρα της εβδομάδας, ή χρησιμοποίησε ξεχωριστή μετρική `weeklyAvailableDays`. 
 - **URL**: `https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/getactualslots`
 - **Σωστό Payload**:
 ```json
@@ -169,6 +264,72 @@
 **Βήμα 4ο - Κράτηση (Το μοναδικό σημείο πόνου)**
 Από τη στιγμή που θα διαλέξει το "12:20", το επόμενο endpoint είναι το `bookappointment` (δεν το αναλύουμε εδώ σε βάθος), ΑΛΛΑ για να γίνει επιτυχώς, πρέπει υποχρεωτικά να στείλεις το χρήστη στη σελίδα Log-in της ΗΔΙΚΑ/TaxisNet για να πάρεις το Cookie `FindDoc` και `cookiesession1`. 
 Η βέλτιστη πρακτική θα ήταν αυτή η εμπειρία αναζήτησης (Βήματα 1,2,3) να είναι ορθάνοιχτη, και το login να γίνεται ακριβώς **τη στιγμή της κράτησης**. 
+
+---
+
+## 4b. Έξτρα modes (επιβεβαιωμένα από reverse-engineering του frontend, May 2026)
+
+Στο επίσημο UI υπάρχουν 6 διακριτές «καρτέλες» αναζήτησης που ο aggregator πρέπει να καλύπτει:
+
+| Mode στο UI                | foreasID / rvtypeId           | Flags                          | Endpoints                                                       |
+|----------------------------|-------------------------------|--------------------------------|-----------------------------------------------------------------|
+| Δημόσια Νοσοκομεία (ΕΣΥ)    | `foreasID=1`                  | `isOnlyFd=0`                   | `/rv/searchhunits` + `/rv/firstavailableslot`                   |
+| Δημόσιες Δομές (ΠΦΥ)        | `foreasID=18`                 | `isOnlyFd=0`                   | `/rv/searchhunits` + `/rv/firstavailableslot`                   |
+| Ιδιώτες συμβεβλημένοι ΕΟΠΥΥ | `foreasID=19`                 | `isOnlyFd=0`                   | `/rv/searchdoctors` + `/rv/searchdoctors/currentlocation`       |
+| Ιδιώτες                     | `foreasID=20`                 | `isOnlyFd=0`                   | `/rv/searchdoctors`                                             |
+| Προσωπικός/Οικογενειακός Γιατρός | `foreasID=18`            | `isOnlyFd=1`                   | `/rv/searchhunitsfd` + `/rv/searchdoctorsfd`                    |
+| Ψυχικής Υγείας              | `rvtypeId=15`                 | `isMentalHealth=1`             | `/rv/searchhunits` + ξεχωριστή λίστα νομών                      |
+| Εμβολιασμοί COVID           | —                             | `isCovid=1`                    | `/rv/searchhunits` + `/gen/getprefecturescovid`                 |
+| Διαγνωστικά Μηχανήματα      | —                             | `isMachine=1`, `rvTypeId=10/16` | `/machines/getMachineRvTypes` + `/machines/searchHunitsMachines` |
+
+**Σημαντικό**: Ο τρέχων δικός μας aggregator καλύπτει **μόνο τις 2 πρώτες γραμμές**. Οι υπόλοιπες 6 είναι gaps που πρέπει να καλυφθούν (βλ. issues #8–#15).
+
+### Πλήρης λίστα endpoints (από reverse-engineering του Angular bundle `5-es2015.*.js`)
+
+**Discovery (GET, με trailing slash όπου σημειώνεται)**:
+- `/api/v1/gen/getspecialities`
+- `/api/v1/gen/getprefectures`
+- `/api/v1/gen/getprefecturescovid`
+- `/api/v1/gen/getprefecturesmentalhealth`
+- `/api/v1/gen/getHealthUnitTypes/` ⚠️
+- `/api/v1/gen/cdoorsbyhunitspeciality`
+- `/api/v1/gen/getEOPYYShowMessage`
+- `/api/v1/gen/getcity`, `/getmunicipality`, `/getregionalunit` (πιθανώς POST — επιστρέφουν 404 σε GET)
+- `/api/v1/gen/getfilteredspecialities` (POST, payload-dependent)
+- `/api/v1/gen/getfilteredprefectures` (POST, payload-dependent)
+- `/api/v1/gen/cancelation`
+- `/api/v1/gen/getparapompesbyamka`, `/updateparapompistatus` (παραπομπές — απαιτεί ΑΜΚΑ + login)
+
+**Αναζήτηση & διαθεσιμότητα (POST)**:
+- `/api/v1/rv/searchhunits`
+- `/api/v1/rv/searchhunitsfd`
+- `/api/v1/rv/searchdoctors`
+- `/api/v1/rv/searchdoctors/currentlocation`
+- `/api/v1/rv/searchdoctorsfd`
+- `/api/v1/rv/firstavailableslot`
+- `/api/v1/rv/getslotsinit`
+- `/api/v1/rv/getslots` (variant — να ερευνηθεί)
+- `/api/v1/rv/getactualslots`
+- `/api/v1/rv/getDoctorDetails` (επιστρέφει 404 σε quick probe — πιθανώς GET με query)
+
+**Booking (POST, απαιτούν cookie)**:
+- `/api/v1/rv/bookrvwithhunit`
+- `/api/v1/rv/bookrvwithouthunit`
+- `/api/v1/rv/cancelrv`
+- `/api/v1/rv/getmyrvs`
+- `/api/v1/rv/getRvDetails`
+- `/api/v1/rv/rvpdf`
+
+**Machines (POST/GET)**:
+- `/api/v1/machines/getMachineRvTypes`
+- `/api/v1/machines/searchHunitsMachines`
+
+**Patient management**:
+- `/api/v1/patienterv/getPatientRvs`, `/savedetails`, `/generatepin`, `/verifypin`, `/generateCredentials`, `/cancelRv`
+
+**Auth / Geo**:
+- `/api/v1/auth/taxisnet`, `/auth/logout`
+- `/api/v1/geocoding/map` (Mapbox proxy μάλλον)
 
 ---
 
