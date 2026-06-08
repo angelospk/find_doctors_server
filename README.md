@@ -15,88 +15,155 @@ This server acts as a specialized proxy that fixes the primary limitation of the
 
 ## 🚀 API Endpoints
 
-### 1. Smart Search (Unified)
-Find the best appointments based on date and proximity. It prioritizes the **soonest** available slot within a specific **distance**.
-`GET /api/search?specialtyId=6&lat=37.9&lon=23.7&maxDistanceInKm=100`
+> **Requires Go 1.26+ to build** (see `go.mod`).
 
-**Parameters:**
-- `specialtyId` (Required): The ID of the medical specialty.
-- `lat`, `lon` (Optional): User coordinates for distance calculation and proximity sorting.
-- `maxDistanceInKm` (Optional): Radius filter. If set, units further than this will be excluded.
-- `prefectureId` (Optional): Filter results to a specific region.
+The public REST API listens on `:8080` (override with `LISTEN_ADDR`). A separate
+admin server on `:9090` (`ADMIN_ADDR`) exposes Prometheus `/metrics` and a fast
+`/healthz`. All responses are `application/json`.
 
-**Response:** 
+### Conventions
+
+**Error envelope** — every error (4xx/5xx) returns:
 ```json
-[
-  {
-    "hunitId": "70600",
-    "name": "Γ.Ν.Α 'Κ.Α.Τ.'",
-    "firstDate": "2026-03-24",
-    "latitude": 38.0673,
-    "longitude": 23.8041,
-    "foreasId": 1,
-    "city": "ΚΗΦΙΣΙΑ"
-  }
-]
+{ "error": { "code": "missing_param", "message": "missing specialtyId" } }
+```
+Codes you'll see: `missing_param`, `invalid_param`, `not_found`,
+`upstream_failure` (502 — the Ministry API failed or returned a non-200),
+`feature_unavailable` (501), `upstream_unavailable` (503, health probe only).
+
+**Pagination** — endpoints that return a `{ "data": [...], "meta": {...} }`
+envelope accept `limit` (default 50, max 200) and `offset` (default 0):
+```json
+{ "data": [ /* ... */ ], "meta": { "total": 128, "limit": 50, "offset": 0 } }
+```
+Discovery/list endpoints (specialties, prefectures, foreas, machine types) return
+a **bare array** instead.
+
+**`foreasId`** (health-unit type) — `1` = Public Hospitals (ΕΣΥ), `18` = Primary
+Care (ΠΦΥ / Κέντρα Υγείας), `19` = Private contracted with ΕΟΠΥΥ, `20` = Private.
+Fetch the live list from `GET /api/foreas`.
+
+---
+
+### Health & Ops
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /healthz`, `GET /livez` | Liveness. Always `{"status":"ok"}`, no upstream dependency. |
+| `GET /readyz` | Process readiness — `{"status":"ready"}`. **Does not** probe the Ministry API on purpose, so it won't flap during upstream hiccups. |
+| `GET /healthz/upstream` | Live, cache-bypassing Ministry reachability probe. `{"upstream":"up","cached":false}` on success (cached 30s), or `503` + error envelope when down. |
+| `GET /metrics` *(admin :9090)* | Prometheus metrics (request counts, upstream latency, retries, cache hits). |
+
+---
+
+### Search & Availability
+
+#### Smart Search (Unified)
+`GET /api/search?specialtyId=24&lat=37.9&lon=23.7&maxDistanceInKm=100&prefectureId=5`
+
+Queries Public Hospitals and Primary Care in parallel, then ranks by soonest slot
+within the distance filter. Params: `specialtyId` (**required**), `lat`/`lon`,
+`maxDistanceInKm`, `prefectureId` (all optional). Supports pagination.
+```json
+{ "data": [
+  { "hunitId": "025", "hunit": 65, "hunittype": 1,
+    "name": "Γ.Ν. ΑΣΚΛΗΠΙΕΙΟ ΒΟΥΛΑΣ", "city": "ΒΟΥΛΑ", "zip": "16673",
+    "phone1": "", "address": "...", "foreasId": 1,
+    "firstDate": "2026-06-09", "distanceKm": 12.4 }
+], "meta": { "total": 30, "limit": 50, "offset": 0 } }
 ```
 
-### 2. Hospital Capacity & Analytics
-Get a detailed fill-rate report for a hospital, including actionable "Next Available" dates.
-`GET /api/hospitals/{hunitId}/capacity`
+#### Nationwide Capacity Heatmap
+`GET /api/heatmap?specialtyId=24`
 
-**Optional Filter:** `?specialtyId=X` to get data only for one department.
-
-**Response:**
+Prefecture-level fill-rate aggregation for a specialty, sorted most-open first.
+Failed upstream scans are excluded from the denominator and surfaced via
+`failedScans`/`partial` so you can flag degraded data during an outage.
 ```json
-{
-  "hunitId": 70600,
-  "scanned": 46,
+{ "specialtyId": 24,
+  "prefectures": [
+    { "prefectureId": 5, "unitCount": 10, "avgFillRate": 0, "firstDate": "2026-06-09" },
+    { "prefectureId": 6, "unitCount": 3,  "avgFillRate": 33.3, "firstDate": "2026-06-17" }
+  ],
+  "scannedUnits": 41, "failedScans": 0, "partial": false }
+```
+
+#### Hospital Capacity
+`GET /api/hospitals/{hunitId}/capacity?specialtyId=24&foreasId=1&prefectureId=5`
+
+Weekly fill-rate report per specialty for one unit. `specialtyId` optional (omit
+for all departments); `foreasId` defaults to `1`. The `disabled`-day fix (#16)
+adds `scheduleDays`, `activeGroups`, `disabledSlots` so the UI can explain how a
+fill rate was computed.
+```json
+{ "hunitId": 70600, "scanned": 1,
   "specialties": [
-    {
-      "specialtyId": 22,
-      "name": "ΑΓΓΕΙΟΧΕΙΡΟΥΡΓΟΣ",
-      "fillRate": 85.5,
-      "firstDate": "2026-04-12"
-    },
-    {
-      "specialtyId": 14,
-      "name": "ΠΑΘΟΛΟΓΟΣ",
-      "fillRate": 100,
-      "firstDate": null
-    }
-  ]
-}
+    { "specialtyId": 24, "name": "ΑΚΤΙΝΟΔΙΑΓΝΩΣΤΗΣ", "fillRate": 0,
+      "firstDate": null, "scheduleDays": [], "activeGroups": 0, "disabledSlots": 0 }
+  ] }
 ```
 
-### 3. Granular Appointment Slots
-Fetch detailed available times, doctor names, and clinic metadata for a specific unit and date.
-`GET /api/hospitals/{hunitId}/slots?specialtyId=X&date=YYYY-MM-DD&prefectureId=Y&foreasId=Z`
+#### Granular Appointment Slots
+`GET /api/hospitals/{hunitId}/slots?specialtyId=24&date=2026-06-20&prefectureId=5&foreasId=1`
 
-**Parameters:**
-- `specialtyId` (Required): The ID of the medical specialty.
-- `date` (Required): Targeted date for appointments (YYYY-MM-DD).
-- `prefectureId` (Required): The regional code (necessary for granular lookups).
-- `foreasId` (Required): Unit type (1 for Hospitals, 18 for Health Centers).
+Detailed times, doctor names, and clinic metadata for a unit on a date.
+Required: `specialtyId`, `date` (YYYY-MM-DD), `prefectureId`, `foreasId`.
+Optional: `timeOfDay` (`morning`|`noon`|`afternoon`, #7), `cDoorId` (clinic door, #20).
+Returns an array of slot objects (`time`, `date`, `docName`, `address`, `comments`, …).
 
-**Response:**
-```json
-[
-  {
-    "hunitId": 718,
-    "time": "10:45",
-    "date": "2026-03-26T10:45:00.000+0200",
-    "dayOfWeek": 4,
-    "docName": "ΚΩΝΣΤΑΝΤΙΝΙΔΗΣ ΑΡΙΣΤΕΙΔΗΣ",
-    "address": "6ο χλμ Εθνικής Οδού Αλεξανδρούπολης",
-    "city": "ΑΛΕΞΑΝΔΡΟΥΠΟΛΗ",
-    "comments": "ΠΡΟΣΟΧΗ ΤΟ ΙΑΤΡΕΙΟ ΕΞΕΤΑΖΕΙ ΠΑΙΔΙΑ...",
-    "rvtName": "Τακτικό"
-  }
-]
-```
+#### Clinic Doors
+`GET /api/hospitals/{hunitId}/doors?specialtyId=24`
 
-### 4. Metadata Discovery
-`GET /api/specialties` - Returns all medical specialties.
+Lists clinic doors (`[{ "cDoorId": 1, "name": "..." }]`) to feed into the
+`cDoorId` slot filter. ⚠️ Returns `502` when the upstream door lookup has no data
+for that unit/specialty.
+
+---
+
+### Doctors, Specialised Modes
+
+#### Named Doctor Search
+`GET /api/doctors/search?specialtyId=24&prefectureId=5&foreasId=19&firstName=&lastName=`
+
+Named physicians (ΕΟΠΥΥ private by default, `foreasId=19`) with AMKA, address, and
+coordinates. `specialtyId` **required**; `firstName`/`lastName` optional filters
+(≤100 chars). Paginated `{data, meta}`. Empty result is `{"data":[],"meta":{...}}`,
+not a placeholder row.
+
+#### Doctor Nearby *(experimental)*
+`GET /api/doctors/nearby?specialtyId=24&lat=37.9&lon=23.7&distance=10&foreasId=19`
+
+Geo variant via the Ministry `searchdoctors/currentlocation` endpoint. ⚠️ The
+upstream geo endpoint currently rejects requests (`400`/`500`) regardless of
+payload, so this surfaces a `502` — left wired for when upstream is fixed.
+
+#### Family / Personal Doctor
+`GET /api/family-doctors/search?specialtyId=24&prefectureId=5`
+
+Family-doctor mode (`isOnlyFd=1`). Returns a hybrid `{ "doctors": [...], "units": [...] }`.
+Upstream is largely per-patient, so nationwide queries often come back empty.
+
+#### COVID & Mental Health
+- `GET /api/covid/search?specialtyId=&prefectureId=&foreasId=` — vaccination centres (`isCovid=1`).
+- `GET /api/mental-health/search?specialtyId=&prefectureId=&foreasId=` — mental-health units (`rvtypeId=15`, `isMentalHealth=1`).
+
+Both return a bare array of units.
+
+#### Diagnostic Machines
+- `GET /api/machines/types` — available exam types: `[{ "rvTypeId": 10, "name": "Αιματολογικές Εξετάσεις", "payType": 1, "isMachine": 1 }]`. `payType=1` means the exam is charged.
+- `GET /api/machines/search?prefectureId=5&rvTypeId=10` — units offering that exam. Wrapped as `{ "disclaimer": "...", "units": [...] }`.
+
+---
+
+### Discovery / Metadata
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/specialties` | `[{ "speciality": 24, "name": "ΑΚΤΙΝΟΔΙΑΓΝΩΣΤΗΣ" }]` |
+| `GET /api/foreas` | `[{ "hUnitType": 1, "name": "Νοσοκομείο", "isActive": 1 }]` — source of truth for `foreasId`. |
+| `GET /api/prefectures` | `[{ "id": 5, "name": "ΑΤΤΙΚΗΣ" }]` |
+| `GET /api/prefectures/covid` | Prefectures with COVID vaccination centres. |
+| `GET /api/prefectures/mental-health` | Prefectures with mental-health units. |
 
 ## 🏗️ Development
 
