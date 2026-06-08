@@ -25,7 +25,7 @@ func TestClient_SearchHUnits(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		
+
 		hId := 718
 		// Return different mock data based on foreasID
 		if payload.ForeasID == 1 {
@@ -53,7 +53,7 @@ func TestClient_SearchHUnits(t *testing.T) {
 		SpecialityID: 6,
 		ForeasID:     1,
 	}
-	
+
 	units, err := client.SearchHUnits(context.Background(), payload)
 	if err != nil {
 		t.Fatalf("SearchHUnits failed: %v", err)
@@ -91,7 +91,7 @@ func TestClient_FirstAvailableSlot(t *testing.T) {
 		if payload.HUnit != nil {
 			h = *payload.HUnit
 		}
-		
+
 		if h == 718 {
 			w.Write([]byte(`"2026-05-07"`))
 		} else {
