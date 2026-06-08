@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -16,6 +18,38 @@ func (s *Server) WithWatches(store *watch.Store, seeder watch.SlotChecker) *Serv
 	s.watches = store
 	s.watchSeeder = seeder
 	return s
+}
+
+// validateWebhookURL guards against SSRF: the watchdog POSTs to this URL from the
+// server, so it must be an http(s) URL whose host does not resolve to a loopback,
+// private, link-local, or otherwise internal address (e.g. cloud metadata).
+func validateWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return errors.New("webhookUrl must be an http(s) URL")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return errors.New("webhookUrl must have a host")
+	}
+
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else {
+		resolved, err := net.LookupIP(host)
+		if err != nil || len(resolved) == 0 {
+			return errors.New("webhookUrl host could not be resolved")
+		}
+		ips = resolved
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return errors.New("webhookUrl must point to a public host")
+		}
+	}
+	return nil
 }
 
 type createWatchRequest struct {
@@ -49,9 +83,8 @@ func (s *Server) HandleCreateWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.WebhookURL != nil && *req.WebhookURL != "" {
-		u, err := url.Parse(*req.WebhookURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			writeJSONError(w, http.StatusBadRequest, "invalid_param", "webhookUrl must be an http(s) URL")
+		if err := validateWebhookURL(*req.WebhookURL); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_param", err.Error())
 			return
 		}
 	}

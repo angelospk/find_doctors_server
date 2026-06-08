@@ -84,7 +84,7 @@ func main() {
 
 	corsCfg := api.CORSConfig{
 		AllowedOrigins: corsOrigins(),
-		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Request-Id"},
 		MaxAge:         600,
 	}

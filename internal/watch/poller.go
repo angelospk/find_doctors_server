@@ -87,8 +87,10 @@ func (p *Poller) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-func (p *Poller) checkOne(ctx context.Context, w Watch) {
-	payload := ministry.SearchPayload{
+// PayloadFor builds the upstream first-available-slot request for a watch. Shared
+// by the poller and the create-time seed in the API layer.
+func PayloadFor(w Watch) ministry.SearchPayload {
+	return ministry.SearchPayload{
 		StartDate:    time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		EndDate:      time.Now().AddDate(0, 6, 0).UTC().Format("2006-01-02T15:04:05.000Z"),
 		SpecialityID: w.SpecialtyID,
@@ -96,6 +98,10 @@ func (p *Poller) checkOne(ctx context.Context, w Watch) {
 		PrefectureID: w.PrefectureID,
 		HUnit:        &w.HUnitID,
 	}
+}
+
+func (p *Poller) checkOne(ctx context.Context, w Watch) {
+	payload := PayloadFor(w)
 
 	cctx, cancel := context.WithTimeout(ctx, p.PerCall)
 	date, err := p.checker.FirstAvailableSlot(cctx, payload)
