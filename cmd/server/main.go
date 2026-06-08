@@ -64,6 +64,9 @@ func main() {
 	)
 
 	addr := ":8080"
+	if v := strings.TrimSpace(os.Getenv("LISTEN_ADDR")); v != "" {
+		addr = v
+	}
 	logger.Info("aggregator backend listening", "addr", addr)
 	srv := &http.Server{
 		Addr:              addr,
