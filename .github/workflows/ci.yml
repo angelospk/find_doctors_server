@@ -37,6 +37,11 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.0
+          version: v2.12.2
+          # Compile golangci-lint with the job's Go toolchain instead of
+          # downloading a prebuilt binary. The prebuilt v2.x binaries are built
+          # with an older Go, and golangci-lint refuses to run when its build
+          # Go is lower than the go.mod target (1.26).
+          install-mode: goinstall

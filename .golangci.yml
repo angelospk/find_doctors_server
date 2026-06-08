@@ -18,6 +18,11 @@ linters:
       excludes:
         # G404 (weak rng): we use crypto/rand only where needed; otherwise math/rand is fine for non-security uses.
         - G404
+    misspell:
+      ignore-rules:
+        # "lattitude" is the literal JSON field name the upstream Ministry API
+        # uses; renaming the struct tag would break response decoding.
+        - lattitude
   exclusions:
     rules:
       - path: _test\.go

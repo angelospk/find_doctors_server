@@ -43,7 +43,7 @@ func newRequestID() string {
 		// Fall back to nanosecond timestamp so we never return an all-zero ID.
 		ts := time.Now().UnixNano()
 		for i := 0; i < 8; i++ {
-			b[i] = byte(ts >> (i * 8))
+			b[i] = byte((ts >> (i * 8)) & 0xff)
 		}
 	}
 	return hex.EncodeToString(b)
