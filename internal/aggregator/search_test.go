@@ -184,9 +184,9 @@ func TestAggregator_SmartSearch(t *testing.T) {
 	h3 := 300
 
 	units := []ministry.HUnit{
-		{HUnit: &h1, Name: "Close Soon", Latitude: 37.98, Longitude: 23.72, ForeasID: 1},      // ~0km
-		{HUnit: &h2, Name: "Far Soon", Latitude: 38.24, Longitude: 21.73, ForeasID: 1},       // ~170km (Patras)
-		{HUnit: &h3, Name: "Close Late", Latitude: 37.97, Longitude: 23.73, ForeasID: 1},      // ~1km
+		{HUnit: &h1, Name: "Close Soon", Latitude: 37.98, Longitude: 23.72, ForeasID: 1}, // ~0km
+		{HUnit: &h2, Name: "Far Soon", Latitude: 38.24, Longitude: 21.73, ForeasID: 1},   // ~170km (Patras)
+		{HUnit: &h3, Name: "Close Late", Latitude: 37.97, Longitude: 23.73, ForeasID: 1}, // ~1km
 	}
 
 	mockClient := &MockMinistryClient{
@@ -228,7 +228,7 @@ func TestAggregator_SmartSearch(t *testing.T) {
 			MaxDistance: 0, // No limit
 		}
 		results := agg.SmartSearch(ctx, units, ministry.SearchPayload{}, opts)
-		
+
 		if len(results) != 3 {
 			t.Fatalf("Expected 3 results, got %d", len(results))
 		}
@@ -356,15 +356,15 @@ func TestAggregator_GetGranularSlots_WithComments(t *testing.T) {
 			if payload.GroupID == 1 {
 				return []ministry.ActualSlot{
 					{
-						HUnitID: 123,
-						RVDate:  "2026-03-23T08:30:00.000+0200",
-						RVTime:  "08:30",
-						DocName: "Dr. Commentator",
-						Address: "123 Comment St",
-						City:    "Literal City",
-						Comments: func(s string) *string { return &s }("Requires medical record."),
+						HUnitID:   123,
+						RVDate:    "2026-03-23T08:30:00.000+0200",
+						RVTime:    "08:30",
+						DocName:   "Dr. Commentator",
+						Address:   "123 Comment St",
+						City:      "Literal City",
+						Comments:  func(s string) *string { return &s }("Requires medical record."),
 						Comments2: func(s string) *string { return &s }("Please arrive 15m early."),
-						RVTName: "Specialized",
+						RVTName:   "Specialized",
 					},
 				}, nil
 			}
