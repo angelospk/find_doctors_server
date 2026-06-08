@@ -18,7 +18,10 @@ adds the registry, the background poller, and the notification last mile.
   ("any unit for this specialty near me") are a noted future extension, not in scope.
 - **Channels:** Telegram (human last mile) and webhook (for a frontend/integration).
   A watch may set either, both, or neither (neither = poll-only via `GET`).
-- **Persistence:** SQLite (pure-Go `modernc.org/sqlite`), survives restarts.
+- **Persistence:** in-memory map guarded by an `RWMutex`, with a **write-through
+  atomic JSON snapshot** (temp file + `os.Rename`). Zero new dependencies, fast,
+  crash-safe. Survives restarts. (Chosen over SQLite/bbolt for smallest footprint —
+  the data is a few hundred watch records at most.)
 
 Out of scope: user accounts/auth, email/web-push, multi-unit watches, booking.
 
@@ -28,7 +31,7 @@ New package `internal/watch`, plus three API handlers and `main.go` wiring.
 
 ```
 POST /api/watches ─┐
-GET  /api/watches/{id}   →  Store (SQLite)  ←──  Poller (ticker goroutine)
+GET  /api/watches/{id}   →  Store (map + JSON snapshot)  ←──  Poller (ticker goroutine)
 DELETE /api/watches/{id} ─┘                          │
                                                      ├─ aggregator.FirstAvailableSlot (rate-limited client)
                                                      └─ Notifier(s): Telegram, Webhook
@@ -51,24 +54,31 @@ DELETE /api/watches/{id} ─┘                          │
 | `Status` | string | `active` \| `expired` \| `cancelled` |
 | `CreatedAt` / `ExpiresAt` / `LastCheckedAt` | time | lifecycle |
 
-**`Store` interface** (SQLite-backed)
+**`Store` interface** (in-memory map + JSON snapshot)
 - `Create(ctx, Watch) (Watch, error)`
 - `Get(ctx, id) (Watch, error)` — `ErrNotFound` when missing
-- `Delete(ctx, id) error` — sets `status=cancelled`
-- `ListActive(ctx) ([]Watch, error)` — `status=active AND expiresAt > now`
-- `Update(ctx, Watch) error` — persists currentDate/lastNotified/lastChecked/status
-  via **conditional SQL** (`WHERE id=? AND status='active'`) so it can't resurrect a
-  cancelled/expired row from a stale in-memory snapshot.
+- `Delete(ctx, id) error` — sets `status=cancelled`, idempotent
+- `ListActive(ctx) ([]Watch, error)` — `status=active AND expiresAt > now`; returns
+  **copies** so callers can't mutate the map's records without going through `Apply`
+- `Apply(ctx, id, fn func(*Watch) bool) error` — the race-safe write primitive: under
+  the write lock, look up the watch, and **only if it is still `active`** call `fn` to
+  mutate it in place; `fn` returns whether anything changed. Replaces SQL conditional
+  updates — a watch `DELETE`d mid-tick is no longer active, so `fn` never runs and the
+  poller can't fire or resurrect it.
 
-Single `*sql.DB` (`modernc.org/sqlite`), schema created on startup (idempotent
-`CREATE TABLE IF NOT EXISTS`). DB path from `WATCH_DB_PATH` (default `./watchdog.db`).
+Backing: `map[string]*Watch` + `sync.RWMutex`. Every mutation (`Create`/`Delete`/
+`Apply`) write-through-persists the whole map via an **atomic snapshot**: marshal to
+JSON, write to `<path>.tmp`, `os.Rename` over `<path>`. On startup, load `<path>` if it
+exists (missing/empty = start fresh). Snapshot path from `WATCH_STATE_PATH`
+(default `./watchdog-state.json`).
 
-**Concurrency policy** (poller writes + HTTP reads/writes share the DB):
-- Open with WAL + busy timeout pragmas: `_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)`.
-- `db.SetMaxOpenConns(1)` for the MVP — write volume is tiny (one batch per poll
-  interval) and a single connection sidesteps SQLite writer-lock contention entirely.
-- Transactions are short and never wrap an upstream or notifier call — the poller
-  reads the active set, releases the DB, does network I/O, then writes results back.
+**Concurrency policy:**
+- Reads (`Get`/`ListActive`) take the read lock; mutations take the write lock.
+- The poller does network I/O (upstream + notifiers) **outside** any lock — it reads
+  the active set (copies), calls upstream/notifiers, then writes each result back via
+  `Apply`, which re-checks `active` atomically. No lock is ever held across I/O.
+- The whole-map JSON rewrite is cheap at this scale; the poller persists at most once
+  per changed watch per tick.
 
 **`Poller`**
 - Started as a goroutine from `main.go`, bound to the existing signal context.
@@ -103,10 +113,9 @@ Single `*sql.DB` (`modernc.org/sqlite`), schema created on startup (idempotent
 - Expiry: when `now > ExpiresAt`, set `status=expired` and stop polling it.
 - Per-watch upstream error: log + metric, leave `CurrentDate`/`LastNotifiedDate`
   untouched, retry next tick. First poll returning empty → leave nil, retry.
-- **Cancel/notify race:** the poller re-reads (or conditionally updates) watch status
-  immediately before notifying. State writes use conditional SQL
-  (`UPDATE ... WHERE id=? AND status='active'`) so a watch `DELETE`d mid-tick never
-  fires a notification and never resurrects.
+- **Cancel/notify race:** all writes go through `Store.Apply`, which mutates a watch
+  only while it is still `active` (under the write lock). A watch `DELETE`d mid-tick
+  is no longer active, so its post-poll write is a no-op and no notification fires.
 
 **`Notifier` interface**: `Notify(ctx, Watch, newDate string) error`
 - `TelegramNotifier` — POSTs to `https://api.telegram.org/bot<token>/sendMessage`
@@ -141,21 +150,24 @@ All errors use the existing `writeJSONError` envelope and codes.
 ## Error Handling
 
 - **Upstream poll failure:** counted in a `watch_poll_failures_total` metric, logged
-  at WARN; watch is skipped this tick (no baseline change, no notify).
+  at WARN; watch is skipped this tick (no state change, no notify).
 - **Notifier failure:** logged + `watch_notify_failures_total`. `LastNotifiedDate`
   advances **only** when at least one configured notifier succeeds. If all fail,
-  `LastNotifiedDate` stays behind `BaselineDate`, so the next tick re-attempts the
+  `LastNotifiedDate` stays behind `CurrentDate`, so the next tick re-attempts the
   notification (see the Notify state model above). A watch with neither channel set
-  is poll-only: `LastNotifiedDate` simply tracks `BaselineDate` and the user reads
+  is poll-only: `LastNotifiedDate` simply tracks `CurrentDate` and the user reads
   state via `GET /api/watches/{id}`.
-- **DB failure on startup:** fatal (server exits) — persistence is a hard dependency.
-- **Bad input:** 400 with envelope, before any DB write.
+- **Snapshot load failure on startup:** a corrupt/unreadable `WATCH_STATE_PATH` is
+  fatal (server exits) rather than silently dropping watches; a *missing* file is
+  fine (start fresh). A snapshot *write* failure mid-run is logged + metric'd; the
+  in-memory state stays authoritative and the next mutation retries the write.
+- **Bad input:** 400 with envelope, before any state mutation.
 
 ## Configuration (env)
 
 | var | default | meaning |
 |-----|---------|---------|
-| `WATCH_DB_PATH` | `./watchdog.db` | SQLite file |
+| `WATCH_STATE_PATH` | `./watchdog-state.json` | JSON snapshot file |
 | `WATCH_POLL_INTERVAL` | `5m` | poll cadence |
 | `WATCH_MAX_DAYS` | `30` | hard cap on `expiresInDays` |
 | `WATCH_SHUTDOWN_GRACE` | `10s` | max drain time for an in-flight poll tick on shutdown |
@@ -166,8 +178,6 @@ token. No behavior change for existing endpoints.
 
 ## Testing (TDD)
 
-- **Store:** CRUD round-trip + `ListActive` filtering on a temp SQLite file
-  (`t.TempDir()`); expired/cancelled excluded.
 - **Poller (primary eval criterion):** mock client returning seed→later→earlier→same
   sequences. Assert: seeding sets `LastNotifiedDate` with no notify; an earlier date
   fires the notifier **exactly once** with the new date and advances
@@ -182,7 +192,8 @@ token. No behavior change for existing endpoints.
   after create is detected; a date already present at create is the baseline and does
   not notify.
 - **Store:** CRUD round-trip + `ListActive` filtering (expired/cancelled excluded) on
-  a `t.TempDir()` SQLite file, WAL enabled.
+  a `t.TempDir()` snapshot file; reload-from-snapshot restores state; `Apply` is a
+  no-op on a cancelled watch.
 - **Notifiers:** `httptest.Server` asserting the Telegram `sendMessage` request shape
   and the webhook JSON payload; non-2xx → error.
 - **API:** create (happy + validation failures), get, delete, unknown-id 404.
@@ -191,7 +202,9 @@ token. No behavior change for existing endpoints.
 ## Decisions (locked during brainstorming)
 
 1. Notify mechanism: webhook + polling endpoint (core), **Telegram** as the human channel.
-2. Persistence: **SQLite** (pure-Go), survives restart.
+2. Persistence: **in-memory + atomic JSON snapshot** (zero deps, smallest/fastest),
+   survives restart. (Brainstorming picked SQLite; narrowed to JSON snapshot on the
+   "smallest and fastest" follow-up.)
 3. Scope: **per-unit** watches for MVP; search-wide deferred.
 
 ## Future extensions (not now)
