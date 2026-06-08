@@ -102,6 +102,35 @@ func TestHandleCreateWatch_BadWebhookURLIs400(t *testing.T) {
 	}
 }
 
+func TestHandleCreateWatch_RejectsSSRFWebhook(t *testing.T) {
+	s := newWatchServer(t, stubSeeder{date: "2026-09-01"})
+	for _, badURL := range []string{
+		"http://127.0.0.1:9999/hook",      // loopback
+		"http://10.0.0.5/hook",            // RFC1918 private
+		"http://169.254.169.254/metadata", // link-local cloud metadata
+	} {
+		body := `{"hunitId":718,"specialtyId":24,"foreasId":1,"webhookUrl":"` + badURL + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/watches", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		mux(s).ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for %s, got %d", badURL, rec.Code)
+		}
+	}
+}
+
+func TestHandleCreateWatch_AllowsPublicWebhook(t *testing.T) {
+	s := newWatchServer(t, stubSeeder{date: "2026-09-01"})
+	// Public IP literal (no DNS needed): must be accepted.
+	body := `{"hunitId":718,"specialtyId":24,"foreasId":1,"webhookUrl":"https://93.184.216.34/hook"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/watches", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux(s).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for public webhook, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleGetWatch_RoundTripAnd404(t *testing.T) {
 	s := newWatchServer(t, stubSeeder{date: "2026-09-01"})
 	created, _ := s.watches.Create(context.Background(), watch.Watch{HUnitID: 1, SpecialtyID: 2})

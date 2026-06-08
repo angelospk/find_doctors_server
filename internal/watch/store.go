@@ -71,10 +71,12 @@ func (s *Store) persist() error {
 	return nil
 }
 
-func newID() string {
+func newID() (string, error) {
 	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("watch: generate id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Create assigns an ID, timestamps, and active status, then persists.
@@ -82,7 +84,11 @@ func (s *Store) Create(ctx context.Context, w Watch) (Watch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	w.ID = newID()
+	id, err := newID()
+	if err != nil {
+		return Watch{}, err
+	}
+	w.ID = id
 	w.Status = StatusActive
 	w.CreatedAt = time.Now()
 
