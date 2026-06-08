@@ -58,6 +58,8 @@ func main() {
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/slots", server.HandleGranularSlots)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/doors", server.HandleClinicDoors)
 
+	mux.HandleFunc("GET /api/heatmap", server.HandleNationwideHeatmap)
+
 	// JSON catch-all so unknown routes get the standard error envelope instead
 	// of Go's default plain-text "404 page not found".
 	mux.HandleFunc("/", api.JSONNotFoundHandler)
