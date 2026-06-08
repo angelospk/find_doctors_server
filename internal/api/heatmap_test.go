@@ -75,8 +75,8 @@ func TestHandleNationwideHeatmap_Success(t *testing.T) {
 		searchFunc: func(ctx context.Context, p ministry.SearchPayload) ([]ministry.HUnit, error) {
 			if p.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h2, Prefecture: &pref, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil

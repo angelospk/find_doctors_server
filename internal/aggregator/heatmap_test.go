@@ -21,9 +21,9 @@ func TestNationwideHeatmap_GroupsByPrefecture(t *testing.T) {
 	mockClient := &MockMinistryClient{
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			return []ministry.HUnit{
-				{HUnit: &h1, Name: "Unit1", Prefecture: &pref1, ForeasID: payload.ForeasID},
-				{HUnit: &h2, Name: "Unit2", Prefecture: &pref1, ForeasID: payload.ForeasID},
-				{HUnit: &h3, Name: "Unit3", Prefecture: &pref2, ForeasID: payload.ForeasID},
+				{HUnitID: []byte(`"1"`), HUnit: &h1, Name: "Unit1", Prefecture: &pref1, ForeasID: payload.ForeasID},
+				{HUnitID: []byte(`"1"`), HUnit: &h2, Name: "Unit2", Prefecture: &pref1, ForeasID: payload.ForeasID},
+				{HUnitID: []byte(`"1"`), HUnit: &h3, Name: "Unit3", Prefecture: &pref2, ForeasID: payload.ForeasID},
 			}, nil
 		},
 		FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
@@ -70,8 +70,8 @@ func TestNationwideHeatmap_NilPrefectureUsesZero(t *testing.T) {
 	mockClient := &MockMinistryClient{
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			return []ministry.HUnit{
-				{HUnit: &h1, Name: "NoPrefs", Prefecture: nil, ForeasID: payload.ForeasID},
-				{HUnit: &h2, Name: "WithPref", Prefecture: &someID, ForeasID: payload.ForeasID},
+				{HUnitID: []byte(`"1"`), HUnit: &h1, Name: "NoPrefs", Prefecture: nil, ForeasID: payload.ForeasID},
+				{HUnitID: []byte(`"1"`), HUnit: &h2, Name: "WithPref", Prefecture: &someID, ForeasID: payload.ForeasID},
 			}, nil
 		},
 		FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
@@ -105,23 +105,21 @@ func TestNationwideHeatmap_FillRateCalculation(t *testing.T) {
 	pref := 5
 	h1, h2, h3, h4 := 1, 2, 3, 4
 
-	callCount := 0
 	mockClient := &MockMinistryClient{
 		// Return only on first call to avoid duplication skewing the ratio
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			// foreasID 1 returns 4 units, foreasID 18 returns empty
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h3, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h4, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h3, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h4, Prefecture: &pref, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil
 		},
 		FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
-			callCount++
 			// Only h1 gets a slot; h2, h3, h4 get empty (nil FirstDate)
 			if payload.HUnit != nil && *payload.HUnit == h1 {
 				return "2026-05-01", nil
@@ -155,9 +153,9 @@ func TestNationwideHeatmap_FirstDateIsMinimum(t *testing.T) {
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h3, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h3, Prefecture: &pref, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil
@@ -204,8 +202,8 @@ func TestNationwideHeatmap_FirstDateNilWhenAllNil(t *testing.T) {
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h2, Prefecture: &pref, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil
@@ -242,12 +240,12 @@ func TestNationwideHeatmap_SortedByFillRateAsc(t *testing.T) {
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &hA1, Prefecture: &prefA, ForeasID: 1},
-					{HUnit: &hA2, Prefecture: &prefA, ForeasID: 1},
-					{HUnit: &hB1, Prefecture: &prefB, ForeasID: 1},
-					{HUnit: &hB2, Prefecture: &prefB, ForeasID: 1},
-					{HUnit: &hC1, Prefecture: &prefC, ForeasID: 1},
-					{HUnit: &hC2, Prefecture: &prefC, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hA1, Prefecture: &prefA, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hA2, Prefecture: &prefA, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hB1, Prefecture: &prefB, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hB2, Prefecture: &prefB, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hC1, Prefecture: &prefC, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &hC2, Prefecture: &prefC, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil
@@ -337,9 +335,9 @@ func TestNationwideHeatmap_ScanErrorExcludedFromDenominator(t *testing.T) {
 		SearchHUnitsFunc: func(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h2, Prefecture: &pref, ForeasID: 1},
-					{HUnit: &h3, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h1, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h2, Prefecture: &pref, ForeasID: 1},
+					{HUnitID: []byte(`"1"`), HUnit: &h3, Prefecture: &pref, ForeasID: 1},
 				}, nil
 			}
 			return []ministry.HUnit{}, nil
