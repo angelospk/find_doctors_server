@@ -22,6 +22,14 @@ type PrefectureStats struct {
 type HeatmapReport struct {
 	SpecialtyID int               `json:"specialtyId"`
 	Prefectures []PrefectureStats `json:"prefectures"`
+	// ScannedUnits is the total number of units the scanner attempted to check.
+	ScannedUnits int `json:"scannedUnits"`
+	// FailedScans is the number of units whose upstream availability check failed.
+	// These are excluded from every prefecture's fill-rate denominator.
+	FailedScans int `json:"failedScans"`
+	// Partial is true when at least one scan failed, signalling that the
+	// prefecture stats are computed from incomplete data (e.g. an upstream outage).
+	Partial bool `json:"partial"`
 }
 
 // NationwideHeatmap aggregates hospital fill-rates at the prefecture level for a given specialty.
@@ -53,10 +61,12 @@ func (a *Aggregator) NationwideHeatmap(ctx context.Context, specialtyID int) (He
 	}
 	groups := make(map[int]*groupAccum)
 
+	failedScans := 0
 	for _, u := range scanned {
 		// Skip units whose availability check failed — a scan error is not the
 		// same as "no slot available", so don't count them in the fill-rate.
 		if !u.ScanOK {
+			failedScans++
 			continue
 		}
 
@@ -103,7 +113,10 @@ func (a *Aggregator) NationwideHeatmap(ctx context.Context, specialtyID int) (He
 	})
 
 	return HeatmapReport{
-		SpecialtyID: specialtyID,
-		Prefectures: prefectures,
+		SpecialtyID:  specialtyID,
+		Prefectures:  prefectures,
+		ScannedUnits: len(scanned),
+		FailedScans:  failedScans,
+		Partial:      failedScans > 0,
 	}, nil
 }

@@ -377,4 +377,14 @@ func TestNationwideHeatmap_ScanErrorExcludedFromDenominator(t *testing.T) {
 	if report.Prefectures[0].UnitCount != 2 {
 		t.Errorf("expected UnitCount=2 (only successful scans), got %d", report.Prefectures[0].UnitCount)
 	}
+	// Partiality must be surfaced: 1 scan failed out of 3 scanned.
+	if report.FailedScans != 1 {
+		t.Errorf("expected FailedScans=1, got %d", report.FailedScans)
+	}
+	if report.ScannedUnits != 3 {
+		t.Errorf("expected ScannedUnits=3, got %d", report.ScannedUnits)
+	}
+	if !report.Partial {
+		t.Error("expected Partial=true when a scan fails")
+	}
 }
