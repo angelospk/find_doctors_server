@@ -148,6 +148,8 @@ type Doctor struct {
 
 // SearchDoctorsPayload is the JSON body for /rv/searchdoctors and variants.
 type SearchDoctorsPayload struct {
+	StartDate      string   `json:"startDate"`
+	EndDate        string   `json:"endDate"`
 	PrefectureID   *int     `json:"prefectureID"`
 	SpecialityID   int      `json:"specialityID"`
 	ForeasID       int      `json:"foreasID"`

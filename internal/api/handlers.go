@@ -321,7 +321,10 @@ func (s *Server) HandleDoctorSearch(w http.ResponseWriter, r *http.Request) {
 			foreasID = id
 		}
 	}
+	now := time.Now().UTC()
 	payload := ministry.SearchDoctorsPayload{
+		StartDate:    now.Format("2006-01-02T15:04:05.000Z"),
+		EndDate:      now.AddDate(0, 6, 0).Format("2006-01-02T15:04:05.000Z"),
 		SpecialityID: specID,
 		ForeasID:     foreasID,
 		PrefectureID: parseIntPtr(r.URL.Query().Get("prefectureId")),
@@ -361,7 +364,10 @@ func (s *Server) HandleDoctorNearby(w http.ResponseWriter, r *http.Request) {
 			foreasID = id
 		}
 	}
+	now := time.Now().UTC()
 	payload := ministry.SearchDoctorsPayload{
+		StartDate:    now.Format("2006-01-02T15:04:05.000Z"),
+		EndDate:      now.AddDate(0, 6, 0).Format("2006-01-02T15:04:05.000Z"),
 		SpecialityID: specID,
 		ForeasID:     foreasID,
 		Latitude:     lat,
@@ -396,6 +402,8 @@ func (s *Server) HandleFamilyDoctorSearch(w http.ResponseWriter, r *http.Request
 	end := now.AddDate(0, 6, 0).Format("2006-01-02T15:04:05.000Z")
 
 	docsPayload := ministry.SearchDoctorsPayload{
+		StartDate:    start,
+		EndDate:      end,
 		SpecialityID: specID,
 		ForeasID:     18,
 		PrefectureID: prefPtr,
