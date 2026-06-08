@@ -169,7 +169,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 			lastErr = err
 		} else {
 			if res.StatusCode == http.StatusOK {
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				apiCallsTotal.WithLabelValues(endpoint, "success").Inc()
 				if out == nil {
 					_, _ = io.Copy(io.Discard, res.Body)
