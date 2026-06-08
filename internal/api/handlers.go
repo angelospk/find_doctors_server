@@ -231,11 +231,12 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// HandleReadyz pings a cheap upstream endpoint to confirm the ministry API is reachable.
+// HandleReadyz performs a live, cache-bypassing upstream reachability check so
+// readiness reflects the ministry API's true state rather than a stale 24h cache.
 func (s *Server) HandleReadyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	if _, err := s.agg.GetSpecialties(ctx); err != nil {
+	if err := s.agg.Ready(ctx); err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "upstream_unavailable", err.Error())
 		return
 	}

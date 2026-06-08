@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRequestID_GeneratedAndEchoed(t *testing.T) {
@@ -86,6 +87,46 @@ func TestCORS_PreflightAndOrigin(t *testing.T) {
 	h.ServeHTTP(rr2, req2)
 	if rr2.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("expected no ACAO header for disallowed origin")
+	}
+}
+
+func TestTimeout_EmitsJSONEnvelope(t *testing.T) {
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	h := TimeoutMiddleware(10 * time.Millisecond)(slow)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/x", nil))
+
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected application/json content type, got %q", ct)
+	}
+	var body errorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("expected JSON error body, got %q", rr.Body.String())
+	}
+	if body.Error.Code != "timeout" {
+		t.Errorf("expected code=timeout, got %q", body.Error.Code)
+	}
+}
+
+func TestTimeout_PassesThroughFastHandler(t *testing.T) {
+	fast := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("ok"))
+	})
+	h := TimeoutMiddleware(time.Second)(fast)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/x", nil))
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 passthrough, got %d", rr.Code)
+	}
+	if rr.Body.String() != "ok" {
+		t.Errorf("expected body passthrough, got %q", rr.Body.String())
 	}
 }
 

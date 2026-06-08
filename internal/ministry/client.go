@@ -119,7 +119,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 			}
 			// Drain & close so the connection can be reused.
 			_, _ = io.Copy(io.Discard, res.Body)
-			res.Body.Close()
+			_ = res.Body.Close()
 			if !retryableStatus(res.StatusCode) {
 				return fmt.Errorf("unexpected status code: %d", res.StatusCode)
 			}
@@ -195,6 +195,15 @@ func (c *Client) GetSpecialties(ctx context.Context) ([]Specialty, error) {
 		return nil, err
 	}
 	return v.([]Specialty), nil
+}
+
+// Ping performs a cheap, cache-bypassing GET against a lightweight upstream
+// endpoint to confirm the ministry API is actually reachable right now.
+// Used by readiness probes so a stale 24h cache can't mask an outage.
+func (c *Client) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/p-appointment/api/v1/gen/getspecialities", c.BaseURL)
+	// out == nil drains the body without decoding, keeping this cheap.
+	return c.doJSON(ctx, http.MethodGet, url, nil, nil)
 }
 
 // GetHealthUnitTypes retrieves the foreas/health-unit-types catalog.

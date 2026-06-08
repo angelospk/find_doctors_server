@@ -86,6 +86,24 @@ func (a *Aggregator) DoctorClient() DoctorClient { return a.docClient }
 // (e.g. COVID / Mental Health flag passthrough).
 func (a *Aggregator) Client() MinistryClient { return a.client }
 
+// pinger is implemented by clients that can perform a cheap, cache-bypassing
+// upstream reachability check (the real *ministry.Client does).
+type pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// Ready performs a live upstream reachability check for readiness probes.
+// It bypasses the 24h specialties cache when the client supports Ping, so a
+// stale cache cannot keep readiness green during an upstream outage. Clients
+// without Ping fall back to GetSpecialties.
+func (a *Aggregator) Ready(ctx context.Context) error {
+	if p, ok := a.client.(pinger); ok {
+		return p.Ping(ctx)
+	}
+	_, err := a.client.GetSpecialties(ctx)
+	return err
+}
+
 // SearchUnified runs searches across active foreas types concurrently and merges results.
 func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
 	foreasIDs := a.activeForeasIDs(ctx, []int{1, 18})

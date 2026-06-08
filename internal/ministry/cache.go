@@ -92,12 +92,16 @@ func (s *singleflight) Do(key string, fn func() (any, error)) (any, error) {
 	s.calls[key] = c
 	s.mu.Unlock()
 
-	c.val, c.err = fn()
-	c.wg.Done()
+	// Defer cleanup so a panic in fn() can't leave the WaitGroup held or the
+	// key stuck in s.calls, which would deadlock every future caller for it.
+	defer func() {
+		s.mu.Lock()
+		delete(s.calls, key)
+		s.mu.Unlock()
+		c.wg.Done()
+	}()
 
-	s.mu.Lock()
-	delete(s.calls, key)
-	s.mu.Unlock()
+	c.val, c.err = fn()
 
 	return c.val, c.err
 }
