@@ -8,12 +8,6 @@ import (
 	"github.com/angelospk/find_doctors_server/internal/ministry"
 )
 
-// helper to create an int pointer
-func intPtr(v int) *int { return &v }
-
-// helper to create a string pointer
-func strPtr(s string) *string { return &s }
-
 func TestNationwideHeatmap_GroupsByPrefecture(t *testing.T) {
 	pref1, pref2 := 11, 22
 	h1, h2, h3 := 1, 2, 3

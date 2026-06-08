@@ -28,15 +28,16 @@ func TestClient_SearchHUnits(t *testing.T) {
 
 		hId := 718
 		// Return different mock data based on foreasID
-		if payload.ForeasID == 1 {
+		switch payload.ForeasID {
+		case 1:
 			json.NewEncoder(w).Encode([]HUnit{
 				{HUnit: &hId, Name: "ΠΑΝΕΠΙΣΤΗΜΙΑΚΟ ΓΕΝΙΚΟ ΝΟΣΟΚΟΜΕΙΟ", City: "ΑΛΕΞΑΝΔΡΟΥΠΟΛΗ"},
 			})
-		} else if payload.ForeasID == 18 {
+		case 18:
 			json.NewEncoder(w).Encode([]HUnit{
 				{HUnit: &hId, Name: "ΙΑΤΡΕΙΑ ΔΙΔΥΜΟΤΕΙΧΟΥ", City: "ΔΙΔΥΜΟΤΕΙΧΟ"},
 			})
-		} else {
+		default:
 			// Simulating the actual ministry API empty/PFY fallback
 			json.NewEncoder(w).Encode([]HUnit{})
 		}
