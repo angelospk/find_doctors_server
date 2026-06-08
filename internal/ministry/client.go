@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"time"
 )
@@ -18,6 +19,9 @@ type Client struct {
 
 	cache *TTLCache
 	sf    *singleflight
+
+	// sem caps total concurrent upstream calls. nil = unlimited.
+	sem chan struct{}
 
 	// Retry knobs. Zero values fall back to sensible defaults in retryDo.
 	MaxRetries int
@@ -32,9 +36,39 @@ func NewClient(baseURL string) *Client {
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 		cache:      NewTTLCache(),
 		sf:         newSingleflight(),
-		MaxRetries: 3,
+		MaxRetries: 2,
 		RetryWait:  200 * time.Millisecond,
 	}
+}
+
+// SetMaxConcurrency caps how many upstream requests may be in flight at once.
+// A non-positive value disables the limiter. Pass via env at startup.
+func (c *Client) SetMaxConcurrency(n int) {
+	if n <= 0 {
+		c.sem = nil
+		return
+	}
+	c.sem = make(chan struct{}, n)
+}
+
+// acquire blocks until a slot is free or the context is cancelled.
+func (c *Client) acquire(ctx context.Context) error {
+	if c.sem == nil {
+		return nil
+	}
+	select {
+	case c.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) release() {
+	if c.sem == nil {
+		return
+	}
+	<-c.sem
 }
 
 // Cache exposes the underlying TTL cache (admin flush, tests).
@@ -60,6 +94,26 @@ func retryableStatus(code int) bool {
 	return false
 }
 
+// endpointLabel collapses a full URL to a short label suitable for metrics
+// cardinality (e.g. "/p-appointment/api/v1/rv/searchhunits" → "rv/searchhunits").
+func endpointLabel(url string) string {
+	const marker = "/api/v1/"
+	i := stringIndex(url, marker)
+	if i < 0 {
+		return "unknown"
+	}
+	return url[i+len(marker):]
+}
+
+func stringIndex(s, substr string) int {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
 // doJSON sends a JSON request (GET or POST), retrying transient failures, and
 // decodes the response body into out. The body is rebuilt per attempt so retries
 // are safe.
@@ -82,11 +136,13 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		wait = 200 * time.Millisecond
 	}
 
+	endpoint := endpointLabel(url)
 	var lastErr error
 	for attempt := 0; attempt < max; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		start := time.Now()
 
 		var rdr io.Reader
 		if encoded != nil {
@@ -98,8 +154,14 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		}
 		c.setStdHeaders(req)
 
+		if err := c.acquire(ctx); err != nil {
+			return err
+		}
 		res, err := c.HTTPClient.Do(req)
+		c.release()
+		apiLatency.WithLabelValues(endpoint).Observe(time.Since(start).Seconds())
 		if err != nil {
+			apiCallsTotal.WithLabelValues(endpoint, "network_error").Inc()
 			// Never retry caller cancellations or deadline overruns.
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
@@ -108,6 +170,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		} else {
 			if res.StatusCode == http.StatusOK {
 				defer res.Body.Close()
+				apiCallsTotal.WithLabelValues(endpoint, "success").Inc()
 				if out == nil {
 					_, _ = io.Copy(io.Discard, res.Body)
 					return nil
@@ -120,6 +183,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 			// Drain & close so the connection can be reused.
 			_, _ = io.Copy(io.Discard, res.Body)
 			_ = res.Body.Close()
+			apiCallsTotal.WithLabelValues(endpoint, fmt.Sprintf("status_%d", res.StatusCode)).Inc()
 			if !retryableStatus(res.StatusCode) {
 				return fmt.Errorf("unexpected status code: %d", res.StatusCode)
 			}
@@ -128,7 +192,12 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 
 		// Backoff before next attempt (unless this was the last).
 		if attempt < max-1 {
-			delay := wait * time.Duration(1<<attempt)
+			apiRetries.WithLabelValues(endpoint).Inc()
+			// Jittered backoff: base ± 25% so concurrent clients don't
+			// retry in lockstep against a recovering upstream.
+			base := wait * time.Duration(1<<attempt)
+			jitter := time.Duration(rand.Int63n(int64(base)/2 + 1))
+			delay := base - base/4 + jitter
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -173,8 +242,10 @@ func (c *Client) FirstAvailableSlot(ctx context.Context, payload SearchPayload) 
 func (c *Client) GetSpecialties(ctx context.Context) ([]Specialty, error) {
 	const key = "specialties"
 	if v, ok := c.cache.Get(key); ok {
+		observeCacheHit(key)
 		return v.([]Specialty), nil
 	}
+	observeCacheMiss(key)
 	v, err := c.sf.Do(key, func() (any, error) {
 		// Detach from the caller's ctx so one cancellation does not poison
 		// every other goroutine waiting on the same singleflight key.
@@ -212,8 +283,10 @@ func (c *Client) Ping(ctx context.Context) error {
 func (c *Client) GetHealthUnitTypes(ctx context.Context) ([]HealthUnitType, error) {
 	const key = "healthUnitTypes"
 	if v, ok := c.cache.Get(key); ok {
+		observeCacheHit(key)
 		return v.([]HealthUnitType), nil
 	}
+	observeCacheMiss(key)
 	v, err := c.sf.Do(key, func() (any, error) {
 		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -251,8 +324,10 @@ func (c *Client) GetMentalHealthPrefectures(ctx context.Context) ([]Prefecture, 
 
 func (c *Client) fetchPrefectures(ctx context.Context, cacheKey, path string) ([]Prefecture, error) {
 	if v, ok := c.cache.Get(cacheKey); ok {
+		observeCacheHit(cacheKey)
 		return v.([]Prefecture), nil
 	}
+	observeCacheMiss(cacheKey)
 	v, err := c.sf.Do(cacheKey, func() (any, error) {
 		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -359,8 +434,10 @@ func (c *Client) GetClinicDoors(ctx context.Context, hunitID, specialtyID int) (
 func (c *Client) GetMachineRvTypes(ctx context.Context) ([]MachineRvType, error) {
 	const key = "machineRvTypes"
 	if v, ok := c.cache.Get(key); ok {
+		observeCacheHit(key)
 		return v.([]MachineRvType), nil
 	}
+	observeCacheMiss(key)
 	v, err := c.sf.Do(key, func() (any, error) {
 		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

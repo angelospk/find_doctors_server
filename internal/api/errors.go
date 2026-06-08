@@ -35,3 +35,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// JSONNotFoundHandler is a catch-all that returns the standard JSON error
+// envelope for unmatched routes (Go's default is plain-text "404 page not
+// found", which breaks API clients that always parse JSON).
+func JSONNotFoundHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSONError(w, http.StatusNotFound, "not_found", "route not found")
+}
