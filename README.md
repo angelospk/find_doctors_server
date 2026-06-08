@@ -165,6 +165,44 @@ Both return a bare array of units.
 | `GET /api/prefectures/covid` | Prefectures with COVID vaccination centres. |
 | `GET /api/prefectures/mental-health` | Prefectures with mental-health units. |
 
+### Cancellation Watchdog (ICYMI)
+
+Register a watch on a specific unit + specialty; a background poller re-checks the
+first-available date and alerts you when an **earlier** slot appears (e.g. after a
+cancellation). Notifications go to Telegram and/or a webhook; either way the current
+state is always readable via `GET`.
+
+`POST /api/watches`
+```json
+{ "hunitId": 718, "specialtyId": 24, "foreasId": 1, "prefectureId": 5,
+  "telegramChatId": "123456789", "webhookUrl": "https://example.com/hook",
+  "expiresInDays": 14 }
+```
+`hunitId`, `specialtyId`, `foreasId` are **required**; `telegramChatId`/`webhookUrl`
+are optional channels (set neither to use poll-only). `expiresInDays` is clamped to
+1–30 (default 14). On create the server does one synchronous first-available check to
+seed the baseline, then returns `201` with the watch:
+```json
+{ "id": "5931bdd8…", "hunitId": 718, "specialtyId": 24, "foreasId": 1,
+  "currentDate": "2026-09-01", "lastNotifiedDate": "2026-09-01",
+  "status": "active", "createdAt": "…", "expiresAt": "…" }
+```
+
+`GET /api/watches/{id}` → current state (`currentDate`, `lastNotifiedDate`,
+`lastCheckedAt`, `status`); `404` if unknown.
+`DELETE /api/watches/{id}` → `204`, idempotent (sets `status: "cancelled"`).
+
+**Webhook payload** (POST to your `webhookUrl`):
+```json
+{ "watchId": "…", "hunitId": 718, "specialtyId": 24,
+  "newDate": "2026-07-01", "previousDate": "2026-09-01" }
+```
+
+Config (env): `WATCH_STATE_PATH` (default `./watchdog-state.json`),
+`WATCH_POLL_INTERVAL` (default `5m`), `TELEGRAM_BOT_TOKEN` (enables Telegram). State
+persists across restarts via an atomic JSON snapshot. Metrics:
+`watch_poll_failures_total`, `watch_notify_failures_total`.
+
 ## 🏗️ Development
 
 ### Running Tests (TDD)
