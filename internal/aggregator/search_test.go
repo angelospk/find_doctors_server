@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -61,13 +62,13 @@ func TestAggregator_SearchUnified(t *testing.T) {
 
 			if payload.ForeasID == 1 {
 				return []ministry.HUnit{
-					{HUnit: &h1, Name: "Hospital 1", ForeasID: 1},
-					{HUnit: &h2, Name: "Hospital 2", ForeasID: 1},
+					{HUnitID: json.RawMessage(`"100"`), HUnit: &h1, Name: "Hospital 1", ForeasID: 1},
+					{HUnitID: json.RawMessage(`"200"`), HUnit: &h2, Name: "Hospital 2", ForeasID: 1},
 				}, nil
 			} else if payload.ForeasID == 18 {
 				h3 := 300
 				return []ministry.HUnit{
-					{HUnit: &h3, Name: "PFY 1", ForeasID: 18},
+					{HUnitID: json.RawMessage(`"300"`), HUnit: &h3, Name: "PFY 1", ForeasID: 18},
 				}, nil
 			}
 			return nil, errors.New("unknown foreas")
