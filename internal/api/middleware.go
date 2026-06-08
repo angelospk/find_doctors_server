@@ -64,11 +64,56 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // TimeoutMiddleware enforces a server-side request timeout. The downstream
-// handler should respect r.Context() cancellation.
+// handler should respect r.Context() cancellation. On timeout it emits a 504
+// using the same JSON error envelope as the rest of the API.
+//
+// http.TimeoutHandler hard-codes a text/html Content-Type on its 503 body, so
+// we wrap it: the inner TimeoutHandler enforces the deadline, and the outer
+// handler rewrites the timeout response into a proper JSON 504 envelope.
 func TimeoutMiddleware(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.TimeoutHandler(next, d, `{"error":{"code":"timeout","message":"request timed out"}}`)
+		inner := http.TimeoutHandler(next, d, "")
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tw := &timeoutResponseWriter{ResponseWriter: w}
+			inner.ServeHTTP(tw, r)
+			if tw.timedOut {
+				writeJSONError(w, http.StatusGatewayTimeout, "timeout", "request timed out")
+			}
+		})
 	}
+}
+
+// timeoutResponseWriter intercepts the 503 that http.TimeoutHandler emits when a
+// request exceeds its deadline, suppressing its body/headers so the wrapper can
+// substitute a JSON error envelope. Non-timeout responses pass through untouched.
+type timeoutResponseWriter struct {
+	http.ResponseWriter
+	timedOut    bool
+	wroteHeader bool
+}
+
+func (w *timeoutResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	// TimeoutHandler writes exactly http.StatusServiceUnavailable on timeout.
+	if status == http.StatusServiceUnavailable {
+		w.timedOut = true
+		return
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *timeoutResponseWriter) Write(b []byte) (int, error) {
+	if w.timedOut {
+		// Swallow the default text/html timeout body.
+		return len(b), nil
+	}
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
 }
 
 // CORSConfig drives the CORS middleware.
