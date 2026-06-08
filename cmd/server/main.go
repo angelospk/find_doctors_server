@@ -17,6 +17,7 @@ import (
 	"github.com/angelospk/find_doctors_server/internal/aggregator"
 	"github.com/angelospk/find_doctors_server/internal/api"
 	"github.com/angelospk/find_doctors_server/internal/ministry"
+	"github.com/angelospk/find_doctors_server/internal/watch"
 )
 
 func main() {
@@ -30,7 +31,20 @@ func main() {
 	logger.Info("initializing concurrent aggregator engine")
 	agg := aggregator.New(client).WithLogger(logger).WithDoctorClient(client)
 
-	server := api.NewServer(agg).WithLogger(logger)
+	logger.Info("initializing cancellation watchdog")
+	watchStore, err := watch.NewStore(envString("WATCH_STATE_PATH", "./watchdog-state.json"))
+	if err != nil {
+		logger.Error("watch store init failed", "error", err)
+		os.Exit(1)
+	}
+	notifiers := []watch.Notifier{watch.NewWebhookNotifier(&http.Client{Timeout: 10 * time.Second})}
+	if tok := os.Getenv("TELEGRAM_BOT_TOKEN"); tok != "" {
+		notifiers = append(notifiers, watch.NewTelegramNotifier(tok, &http.Client{Timeout: 10 * time.Second}))
+	}
+	poller := watch.NewPoller(watchStore, client, notifiers, logger)
+	poller.Interval = envDuration("WATCH_POLL_INTERVAL", 5*time.Minute)
+
+	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.HandleHealthz)
@@ -60,13 +74,17 @@ func main() {
 
 	mux.HandleFunc("GET /api/heatmap", server.HandleNationwideHeatmap)
 
+	mux.HandleFunc("POST /api/watches", server.HandleCreateWatch)
+	mux.HandleFunc("GET /api/watches/{id}", server.HandleGetWatch)
+	mux.HandleFunc("DELETE /api/watches/{id}", server.HandleDeleteWatch)
+
 	// JSON catch-all so unknown routes get the standard error envelope instead
 	// of Go's default plain-text "404 page not found".
 	mux.HandleFunc("/", api.JSONNotFoundHandler)
 
 	corsCfg := api.CORSConfig{
 		AllowedOrigins: corsOrigins(),
-		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Request-Id"},
 		MaxAge:         600,
 	}
@@ -122,6 +140,13 @@ func main() {
 		}
 	}()
 
+	pollerDone := make(chan struct{})
+	go func() {
+		logger.Info("watchdog poller started", "interval", poller.Interval)
+		poller.Run(ctx)
+		close(pollerDone)
+	}()
+
 	select {
 	case err := <-serverErr:
 		logger.Error("server failed", "error", err)
@@ -134,6 +159,11 @@ func main() {
 		if err := publicSrv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("graceful shutdown failed", "error", err)
 			os.Exit(1)
+		}
+		select {
+		case <-pollerDone:
+		case <-shutdownCtx.Done():
+			logger.Warn("watchdog poller did not drain within grace window")
 		}
 		logger.Info("server stopped cleanly")
 	}
@@ -194,6 +224,15 @@ func envFloat(k string, def float64) float64 {
 func envBool(k string, def bool) bool {
 	if v := os.Getenv(k); v != "" {
 		return strings.EqualFold(v, "true") || v == "1"
+	}
+	return def
+}
+
+func envDuration(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return def
 }

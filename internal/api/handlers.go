@@ -10,6 +10,7 @@ import (
 
 	"github.com/angelospk/find_doctors_server/internal/aggregator"
 	"github.com/angelospk/find_doctors_server/internal/ministry"
+	"github.com/angelospk/find_doctors_server/internal/watch"
 )
 
 // upstreamHealthTTL controls how long /healthz/upstream caches a successful
@@ -24,6 +25,10 @@ type Server struct {
 	upHealthMu sync.Mutex
 	upHealthOK bool
 	upHealthAt time.Time
+
+	// Cancellation watchdog (#5). nil when the feature isn't wired.
+	watches     *watch.Store
+	watchSeeder watch.SlotChecker
 }
 
 // NewServer initializes a new Server instance.
