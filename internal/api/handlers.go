@@ -147,6 +147,26 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		PrefectureID: prefPtr,
 	}
 
+	// Optional date window (fromDate/toDate, YYYY-MM-DD) scopes firstavailableslot
+	// so firstDate reflects the caller's desired dates. EndDate is the exclusive
+	// next-day boundary of toDate (avoids dropping late slots via 23:59:59 drift).
+	if fromStr := r.URL.Query().Get("fromDate"); fromStr != "" {
+		from, derr := aggregator.ParseFlexibleDate(fromStr)
+		if derr != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_param", "fromDate must be YYYY-MM-DD or RFC3339")
+			return
+		}
+		payload.StartDate = from.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	if toStr := r.URL.Query().Get("toDate"); toStr != "" {
+		to, derr := aggregator.ParseFlexibleDate(toStr)
+		if derr != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_param", "toDate must be YYYY-MM-DD or RFC3339")
+			return
+		}
+		payload.EndDate = to.AddDate(0, 0, 1).UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+
 	ctx := r.Context()
 	units, err := s.agg.SearchUnified(ctx, payload)
 	if err != nil {
