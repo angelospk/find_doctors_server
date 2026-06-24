@@ -86,6 +86,10 @@ async function connect() {
 	if (!(await checkSession())) {
 		console.log('[bridge] NOT logged in yet → attempting TaxisNet login flow…');
 		await refreshSession();
+	} else {
+		// TaxisNet session is warm, but patient ΑΜΚΑ identification may still be
+		// pending (checkSession passes before it) — complete it if so.
+		await completePatientLogin();
 	}
 }
 
@@ -184,70 +188,91 @@ async function checkSession() {
 	}
 }
 
-// After TaxisNet, finddoctors shows a patient-identification flow (confirm ΑΜΚΑ,
-// tick consent, click through). This drives it to completion. It is conservative:
-// it only fills a field it can positively identify as the ΑΜΚΑ input and only
-// clicks clearly-labelled "proceed" controls, so if the page differs it simply
-// no-ops and the human can finish manually (today's behaviour). Bounded loop so a
-// stuck page can never spin forever.
-const PROCEED_RE = /συνεχ|επομεν|εισοδ|υποβ|αποδοχ|συμφων|επιβεβα|ταυτοπο|καταχωρ|ολοκληρωσ/i;
+// After TaxisNet, finddoctors runs a 2-step patient identification (verified live):
+//   1. #/patients/amka-input — Angular Material form, input[formcontrolname="amka"]
+//      (maxlength 11) + a "Συνέχεια" button that stays disabled until the ΑΜΚΑ
+//      validates. We TYPE the ΑΜΚΑ (pressSequentially, so Angular's reactive
+//      validators fire — fill() alone can leave it pristine/disabled).
+//   2. #/patients/patient-data-confirm — name/birthdate prefilled; click "Επιβεβαίωση".
+// Then it lands on the patient home (off the /patients/ identification routes).
+// Conservative: needs MINISTRY_AMKA; on an unknown page it no-ops so a human can
+// finish manually. NOTE: checkSession() (getHealthUnitTypes) returns 200 even
+// BEFORE this step, so it must NOT gate the flow.
+const IDENTIFY_ROUTE_RE = /amka-input|patient-data-confirm|patients-login/;
+
+async function settle() {
+	await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+	await page.waitForTimeout(900);
+}
+
+// Click a button once it is genuinely enabled (Material marks disabled via both the
+// disabled attr and a .mat-button-disabled class). Polls so we ride out async
+// validation; returns false if it never enables within the timeout.
+async function clickWhenEnabled(selector, timeout = 6000) {
+	const btn = page.locator(selector).first();
+	const deadline = Date.now() + timeout;
+	while (Date.now() < deadline) {
+		if (await btn.count().catch(() => 0)) {
+			const disabled = await btn.isDisabled().catch(() => true);
+			const matDisabled = await btn.evaluate((b) => b.classList.contains('mat-button-disabled')).catch(() => false);
+			if (!disabled && !matDisabled) {
+				await btn.click().catch(() => {});
+				return true;
+			}
+		}
+		await page.waitForTimeout(300);
+	}
+	return false;
+}
 
 async function completePatientLogin() {
 	for (let step = 0; step < 8; step++) {
-		if (await checkSession()) return true;
-		let acted = false;
+		const url = page.url();
 
-		// a) Fill the ΑΜΚΑ field if present and empty (several heuristics; AMKA is 11 digits).
-		if (PATIENT_AMKA) {
-			const amka = page
-				.locator(
-					[
-						'input[formcontrolname*="amka" i]',
-						'input[name*="amka" i]',
-						'input[id*="amka" i]',
-						'input[placeholder*="ΑΜΚΑ" i]',
-						'input[maxlength="11"]'
-					].join(', ')
-				)
-				.first();
-			if (await amka.count().catch(() => 0)) {
-				const cur = await amka.inputValue().catch(() => '');
-				if (!cur) {
-					await amka.fill(PATIENT_AMKA).catch(() => {});
-					await amka.dispatchEvent('input').catch(() => {});
-					await amka.dispatchEvent('change').catch(() => {});
-					acted = true;
-				}
+		// Step 1: ΑΜΚΑ entry.
+		if (url.includes('amka-input')) {
+			if (!PATIENT_AMKA) {
+				console.log('[bridge] ΑΜΚΑ page reached but MINISTRY_AMKA is not set → enter it manually');
+				return false;
 			}
+			const f = page.locator('input[formcontrolname="amka"], input[maxlength="11"]').first();
+			if (await f.count().catch(() => 0)) {
+				const cur = await f.inputValue().catch(() => '');
+				if (cur !== PATIENT_AMKA) {
+					await f.click().catch(() => {});
+					await f.fill('').catch(() => {});
+					await f.pressSequentially(PATIENT_AMKA, { delay: 30 }).catch(() => {});
+					await f.blur().catch(() => {});
+				}
+				const boxes = page.locator('input[type="checkbox"]:not(:checked)');
+				const bc = await boxes.count().catch(() => 0);
+				for (let i = 0; i < bc; i++) await boxes.nth(i).check({ force: true }).catch(() => {});
+				await clickWhenEnabled('button.auth-form-btn, button:has-text("Συνέχεια")', 6000);
+			}
+			await settle();
+			continue;
 		}
 
-		// b) Tick any unchecked required consent checkbox.
-		const boxes = page.locator('input[type="checkbox"]:not(:checked)');
-		const boxCount = await boxes.count().catch(() => 0);
-		for (let i = 0; i < boxCount; i++) {
-			await boxes.nth(i).check({ force: true }).catch(() => {});
-			acted = true;
+		// Step 2: confirm the prefilled patient data (do NOT touch "Επιστροφή").
+		if (url.includes('patient-data-confirm')) {
+			await clickWhenEnabled('button:has-text("Επιβεβαίωση")', 6000);
+			await settle();
+			continue;
 		}
 
-		// c) Click an enabled, visible "proceed" button.
-		const buttons = page.locator('button:visible, [role="button"]:visible, input[type="submit"]:visible');
-		const n = await buttons.count().catch(() => 0);
-		for (let i = 0; i < n; i++) {
-			const b = buttons.nth(i);
-			const txt = ((await b.textContent().catch(() => '')) || '').trim();
-			const val = (await b.getAttribute('value').catch(() => '')) || '';
-			if (!PROCEED_RE.test(txt) && !PROCEED_RE.test(val)) continue;
-			if (await b.isDisabled().catch(() => false)) continue;
-			await b.click().catch(() => {});
-			acted = true;
-			break;
+		// Any other patient gate with a generic proceed button (defensive).
+		if (IDENTIFY_ROUTE_RE.test(url)) {
+			const clicked = await clickWhenEnabled('button:has-text("Συνέχεια"), button:has-text("Επιβεβαίωση"), button[type="submit"]', 4000);
+			if (!clicked) return false;
+			await settle();
+			continue;
 		}
 
-		if (!acted) return await checkSession(); // nothing to do → leave it to the human
-		await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-		await page.waitForTimeout(800);
+		// Off the identification routes → patient identified.
+		console.log(`[bridge] patient identification complete, page: ${page.url()}`);
+		return true;
 	}
-	return await checkSession();
+	return !IDENTIFY_ROUTE_RE.test(page.url());
 }
 
 // Debug aid: a structured snapshot of the current page's form controls so we can
