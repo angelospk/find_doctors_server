@@ -9,6 +9,8 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,9 +25,18 @@ type Client struct {
 	// sem caps total concurrent upstream calls. nil = unlimited.
 	sem chan struct{}
 
+	// session holds the current JSESSIONID value obtained from a TaxisNet login.
+	// As of finddoctors v2.0.3 every upstream call is gated behind this session
+	// cookie; without it the Ministry returns 403. Updated at runtime via the
+	// local session endpoint and read on every request, so it is stored atomically.
+	session atomic.Pointer[string]
+
 	// Retry knobs. Zero values fall back to sensible defaults in retryDo.
 	MaxRetries int
 	RetryWait  time.Duration
+
+	// auto holds optional TaxisNet credentials for browserless (re)login. nil = off.
+	auto *autoLogin
 }
 
 // NewClient creates a new Ministry API client.
@@ -83,7 +94,35 @@ func (c *Client) setStdHeaders(req *http.Request) {
 	req.Header.Set("Origin", "https://www.finddoctors.gov.gr")
 	req.Header.Set("Referer", "https://www.finddoctors.gov.gr/p-appointment/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	if cookie := c.SessionCookie(); cookie != "" {
+		// Accept either a full Cookie header ("JSESSIONID=…; FindDoc=…; cookiesession1=…")
+		// or a bare JSESSIONID value. The Ministry needs ALL THREE finddoctors cookies
+		// (JSESSIONID + httpOnly FindDoc + cookiesession1) — a bare JSESSIONID gets 403.
+		if strings.Contains(cookie, "=") {
+			req.Header.Set("Cookie", cookie)
+		} else {
+			req.Header.Set("Cookie", "JSESSIONID="+cookie)
+		}
+	}
 }
+
+// SetSessionCookie updates the cookies used on all subsequent upstream calls.
+// Pass a full Cookie header value (preferred) or a bare JSESSIONID. Concurrent-safe.
+func (c *Client) SetSessionCookie(cookie string) {
+	v := cookie
+	c.session.Store(&v)
+}
+
+// SessionCookie returns the current cookie header (or bare JSESSIONID), or "".
+func (c *Client) SessionCookie() string {
+	if p := c.session.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// HasSession reports whether a session cookie is currently configured.
+func (c *Client) HasSession() bool { return c.SessionCookie() != "" }
 
 // retryableStatus reports whether an HTTP status code is worth retrying.
 func retryableStatus(code int) bool {
@@ -184,6 +223,15 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 			_, _ = io.Copy(io.Discard, res.Body)
 			_ = res.Body.Close()
 			apiCallsTotal.WithLabelValues(endpoint, fmt.Sprintf("status_%d", res.StatusCode)).Inc()
+			// 403 = session expired/missing. With auto-login, re-establish it (browserless)
+			// and retry; the next attempt re-reads the refreshed session cookie.
+			if res.StatusCode == http.StatusForbidden && c.AutoLoginEnabled() {
+				if lerr := c.ensureFreshSession(ctx); lerr != nil {
+					return fmt.Errorf("auto re-login after 403 failed: %w", lerr)
+				}
+				lastErr = fmt.Errorf("upstream returned 403; re-logged in")
+				continue
+			}
 			if !retryableStatus(res.StatusCode) {
 				return fmt.Errorf("unexpected status code: %d", res.StatusCode)
 			}

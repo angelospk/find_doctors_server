@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,7 +27,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	logger.Info("initializing ministry api client")
-	client := ministry.NewClient("https://www.finddoctors.gov.gr")
+	// MINISTRY_BASE_URL lets us point upstream at a local browser-session bridge
+	// (Playwright) that holds the TaxisNet login, instead of the real portal which
+	// 403s every external client. Defaults to the real portal.
+	client := ministry.NewClient(envString("MINISTRY_BASE_URL", "https://www.finddoctors.gov.gr"))
 	client.SetMaxConcurrency(envInt("MINISTRY_MAX_CONCURRENCY", 30))
 
 	logger.Info("initializing concurrent aggregator engine")
@@ -46,8 +51,68 @@ func main() {
 
 	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client)
 
+	// TaxisNet session bridge. finddoctors v2.0.3 gates every upstream call behind
+	// a JSESSIONID cookie; we accept it at runtime from a local browser bridge (or
+	// headless login) and persist it so it survives restarts.
+	sessionPath := envString("MINISTRY_SESSION_PATH", "./ministry-session.txt")
+	if data, err := os.ReadFile(sessionPath); err == nil {
+		if sid := strings.TrimSpace(string(data)); sid != "" {
+			client.SetSessionCookie(sid)
+			logger.Info("loaded ministry session from disk", "path", sessionPath)
+		}
+	}
+
+	// Browserless auto-login: with TaxisNet creds + ΑΜΚΑ the aggregator establishes
+	// and refreshes its own finddoctors session via plain HTTP — no browser/bridge.
+	// Re-login also fires automatically on a 403 (see client.doJSON).
+	if u, p, a := os.Getenv("TAXISNET_USERNAME"), os.Getenv("TAXISNET_PASSWORD"), os.Getenv("MINISTRY_AMKA"); u != "" && p != "" && a != "" {
+		client.EnableAutoLogin(u, p, a)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := client.LoginTaxisnet(ctx, u, p, a); err != nil {
+				logger.Warn("browserless TaxisNet login failed at startup (will retry on 403)", "error", err)
+			} else {
+				logger.Info("browserless TaxisNet login OK (no browser)")
+			}
+		}()
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.HandleHealthz)
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			JSessionID string `json:"jsessionid"`
+			Cookie     string `json:"cookie"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&body)
+		// Prefer the full Cookie header; fall back to a bare JSESSIONID.
+		sid := strings.TrimSpace(body.Cookie)
+		if sid == "" {
+			sid = strings.TrimSpace(body.JSessionID)
+		}
+		if sid == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"missing_param","message":"missing cookie/jsessionid"}}`))
+			return
+		}
+		client.SetSessionCookie(sid)
+		if err := os.WriteFile(sessionPath, []byte(sid), 0o600); err != nil {
+			logger.Warn("persist ministry session failed", "error", err)
+		}
+		logger.Info("ministry session updated via bridge")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if client.HasSession() {
+			_, _ = w.Write([]byte(`{"hasSession":true}`))
+		} else {
+			_, _ = w.Write([]byte(`{"hasSession":false}`))
+		}
+	})
 	mux.HandleFunc("GET /livez", server.HandleHealthz)
 	mux.HandleFunc("GET /readyz", server.HandleReadyz)
 	mux.HandleFunc("GET /healthz/upstream", server.HandleUpstreamHealth)
