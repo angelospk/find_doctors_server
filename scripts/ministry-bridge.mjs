@@ -28,6 +28,14 @@ import { chromium } from 'playwright-core';
 // standard DevTools endpoint (start it with --remote-debugging-port=9222).
 const MODE = process.env.BRIDGE_CDP_URL ? 'cdp' : process.env.BRIDGE_MODE || 'launch';
 const CDP_URL = process.env.BRIDGE_CDP_URL || 'http://localhost:9222';
+// Silent operation. True headless does NOT work here — finddoctors' Angular SPA
+// refuses to render under headless Chrome (blank DOM / bot-detection), so login
+// never completes. Instead we run a REAL headed Chrome (passes anti-bot) but place
+// its window FAR off-screen, so nothing pops up and no field-filling is visible.
+//   BRIDGE_HEADLESS=true  → force true headless (will likely fail; for testing only)
+//   BRIDGE_VISIBLE=true   → show the window on-screen (for debugging the flow)
+const HEADLESS = process.env.BRIDGE_HEADLESS === 'true';
+const VISIBLE = process.env.BRIDGE_VISIBLE === 'true';
 const PROFILE_DIR = process.env.BRIDGE_PROFILE || path.join(os.homedir(), '.finddoctors-bridge-profile');
 const PORT = Number(process.env.BRIDGE_PORT || 8799);
 // Primary data path: push the live cookie set to the Go aggregator so it can call
@@ -70,11 +78,19 @@ async function connect() {
 		return;
 	}
 	// launch mode: dedicated persistent profile using the installed Google Chrome.
+	// Off-screen unless explicitly headless or visible: a real rendered window that
+	// the user never sees (no pop-up, no visible typing).
+	const offscreen = !HEADLESS && !VISIBLE;
 	const ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
 		channel: 'chrome',
-		headless: false,
-		viewport: null,
-		args: ['--no-first-run', '--no-default-browser-check']
+		headless: HEADLESS,
+		viewport: HEADLESS ? { width: 1280, height: 900 } : null,
+		args: [
+			'--no-first-run',
+			'--no-default-browser-check',
+			'--disable-blink-features=AutomationControlled',
+			...(offscreen ? ['--window-position=-32000,-32000', '--window-size=1280,900', '--start-minimized'] : [])
+		]
 	});
 	browser = ctx.browser() ?? { contexts: () => [ctx], newContext: async () => ctx };
 	const pages = ctx.pages();
