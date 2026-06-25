@@ -56,6 +56,8 @@ type SearchPayload struct {
 	IsMachine      int    `json:"isMachine"`
 	IsMentalHealth int    `json:"isMentalHealth,omitempty"`
 	RvTypeID       int    `json:"rvtypeId,omitempty"`
+	// IAmka identifies a private ΕΟΠΥΥ doctor (foreasID 19) for slot lookups; omitted for units.
+	IAmka *string `json:"i_amka,omitempty"`
 }
 
 // SlotsInitPayload represents the request body for /rv/getslotsinit.
@@ -64,7 +66,7 @@ type SlotsInitPayload struct {
 	EndDate        string `json:"endDate"`
 	SpecialityID   int    `json:"specialityID"`
 	PrefectureID   *int   `json:"prefectureID"`
-	HUnit          *int   `json:"hunit"`
+	HUnit          *int   `json:"hunit,omitempty"`
 	ForeasID       int    `json:"foreasID"`
 	CDoorID        *int   `json:"cDoorId,omitempty"`
 	IsCovid        int    `json:"isCovid"`
@@ -72,6 +74,8 @@ type SlotsInitPayload struct {
 	IsMachine      int    `json:"isMachine"`
 	IsMentalHealth int    `json:"isMentalHealth,omitempty"`
 	RvTypeID       int    `json:"rvtypeId,omitempty"`
+	// IAmka identifies a private ΕΟΠΥΥ doctor (foreasID 19); omitted for units.
+	IAmka *string `json:"i_amka,omitempty"`
 }
 
 // SlotGroup represents a capacity block (e.g., 3 hours) in the /rv/getslotsinit response.
@@ -98,17 +102,21 @@ type ActualSlot struct {
 }
 
 // GetActualSlotsPayload represents the request body for /rv/getactualslots.
+// NOTE: this endpoint uses different key casing than firstavailableslot/getslotsinit
+// (lowercase-d prefectureId/specialityId, key `foreas`); wrong casing returns HTTP 500.
 type GetActualSlotsPayload struct {
 	Day          int    `json:"day"`
 	DDate        string `json:"ddate"`
 	GroupID      int    `json:"groupId"`
-	HUnit        int    `json:"hunit"`
+	HUnit        *int   `json:"hunit,omitempty"`
 	Foreas       int    `json:"foreas"`
 	SpecialityID int    `json:"specialityId"`
 	PrefectureID int    `json:"prefectureId"`
 	IsOnlyFd     int    `json:"isOnlyFd"`
 	IsMachine    int    `json:"isMachine"`
 	CDoorID      *int   `json:"cDoorId"`
+	// IAmka identifies a private ΕΟΠΥΥ doctor (foreasID 19); omitted for units.
+	IAmka *string `json:"i_amka,omitempty"`
 }
 
 // HealthUnitType represents a foreas/unit-type metadata entry from /gen/getHealthUnitTypes/.

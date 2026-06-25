@@ -344,6 +344,56 @@ func (s *Server) HandleGranularSlots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, slots)
 }
 
+// HandleDoctorSlots returns appointment slots for a private ΕΟΠΥΥ doctor (foreasID 19),
+// keyed by the doctor's ΑΜΚΑ (i_amka) rather than a hunit.
+func (s *Server) HandleDoctorSlots(w http.ResponseWriter, r *http.Request) {
+	amka := r.PathValue("amka")
+	if amka == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing_param", "missing amka in path")
+		return
+	}
+
+	specIDStr := r.URL.Query().Get("specialtyId")
+	if specIDStr == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing_param", "missing specialtyId in query")
+		return
+	}
+	specialtyID, err := strconv.Atoi(specIDStr)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", "specialtyId must be an integer")
+		return
+	}
+
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing_param", "missing date in query")
+		return
+	}
+	if _, derr := aggregator.ParseFlexibleDate(date); derr != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_param", "date must be YYYY-MM-DD or RFC3339")
+		return
+	}
+
+	foreasID := 19
+	if fStr := r.URL.Query().Get("foreasId"); fStr != "" {
+		if id, err := strconv.Atoi(fStr); err == nil {
+			foreasID = id
+		}
+	}
+	prefPtr := parseIntPtr(r.URL.Query().Get("prefectureId"))
+
+	slots, err := s.agg.GetDoctorSlots(r.Context(), amka, foreasID, prefPtr, specialtyID, date)
+	if err != nil {
+		s.logger.Warn("doctor slots failed", "amka", amka, "error", err)
+		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "failed to fetch doctor slots")
+		return
+	}
+	if slots == nil {
+		slots = []aggregator.GranularSlot{}
+	}
+	writeJSON(w, http.StatusOK, slots)
+}
+
 // HandleHealthz is a fast liveness probe; no upstream dependency.
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
