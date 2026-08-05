@@ -13,3 +13,13 @@ func distance(lat1, lon1, lat2, lon2 float64) float64 {
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return R * c
 }
+
+// hasCoords reports whether a lat/lon pair carries usable geographic data.
+// A 0/0 record (the upstream default for a missing location) and any NaN
+// component are treated as "unknown" rather than a real point off West Africa.
+func hasCoords(lat, lon float64) bool {
+	if math.IsNaN(lat) || math.IsNaN(lon) {
+		return false
+	}
+	return lat != 0 || lon != 0
+}
