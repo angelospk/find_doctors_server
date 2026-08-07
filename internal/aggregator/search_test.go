@@ -269,6 +269,48 @@ func TestAggregator_SmartSearch(t *testing.T) {
 		}
 	})
 
+	t.Run("Zero-Coordinate Unit Survives Restrictive MaxDistance", func(t *testing.T) {
+		h4 := 400
+		unitsWithMissing := []ministry.HUnit{
+			{HUnit: &h1, Name: "Close Soon", Latitude: 37.98, Longitude: 23.72, ForeasID: 1}, // ~0km
+			{HUnit: &h4, Name: "No Coords", Latitude: 0, Longitude: 0, ForeasID: 1},          // unknown location
+		}
+
+		missingClient := &MockMinistryClient{
+			FirstAvailableSlotFunc: func(ctx context.Context, payload ministry.SearchPayload) (string, error) {
+				return "2024-05-01", nil
+			},
+		}
+		aggMissing := New(missingClient)
+
+		lat, lon := 37.98, 23.72
+		opts := SmartSearchOptions{
+			Lat:         &lat,
+			Lon:         &lon,
+			MaxDistance: 10, // Restrictive: would exclude a huge-distance 0/0 computation
+		}
+		results := aggMissing.SmartSearch(ctx, unitsWithMissing, ministry.SearchPayload{}, opts)
+
+		if len(results) != 2 {
+			t.Fatalf("Expected 2 results (unit with missing coords must survive), got %d", len(results))
+		}
+
+		var foundNoCoords bool
+		for _, r := range results {
+			if r.Name == "No Coords" {
+				foundNoCoords = true
+			}
+		}
+		if !foundNoCoords {
+			t.Errorf("Expected zero-coordinate unit to survive restrictive MaxDistance, but it was dropped")
+		}
+
+		// The unit without usable coordinates should be sorted last.
+		if results[len(results)-1].Name != "No Coords" {
+			t.Errorf("Expected zero-coordinate unit sorted last, got %s", results[len(results)-1].Name)
+		}
+	})
+
 	t.Run("Multi-Level Sorting", func(t *testing.T) {
 		lat, lon := 37.98, 23.72
 		opts := SmartSearchOptions{

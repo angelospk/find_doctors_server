@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -125,12 +126,44 @@ func (c *Client) SessionCookie() string {
 func (c *Client) HasSession() bool { return c.SessionCookie() != "" }
 
 // retryableStatus reports whether an HTTP status code is worth retrying.
+// 429 (Too Many Requests) is included so upstream rate-limiting backs off
+// instead of aborting the whole scan on the first throttle.
 func retryableStatus(code int) bool {
 	switch code {
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError:
+	case http.StatusTooManyRequests,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError:
 		return true
 	}
 	return false
+}
+
+// maxRetryAfter caps how long we honor an upstream Retry-After hint. A
+// misbehaving server advertising minutes must not stall a fan-out scan.
+const maxRetryAfter = 30 * time.Second
+
+// parseRetryAfter interprets a Retry-After header value, which may be either
+// delta-seconds (an integer) or an HTTP-date. It returns the delay to wait and
+// whether the value was understood. Negative/past or unparseable values return
+// ok=false so the caller falls back to the jittered backoff.
+func parseRetryAfter(v string, now time.Time) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs < 0 {
+			return 0, false
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		d := t.Sub(now)
+		if d < 0 {
+			d = 0
+		}
+		return d, true
+	}
+	return 0, false
 }
 
 // endpointLabel collapses a full URL to a short label suitable for metrics
@@ -181,6 +214,10 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// retryAfter holds an upstream-supplied delay (from a 429 Retry-After
+		// header) to honor instead of the jittered backoff this attempt.
+		var retryAfter time.Duration
+		var useRetryAfter bool
 		start := time.Now()
 
 		var rdr io.Reader
@@ -219,6 +256,11 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 				}
 				return nil
 			}
+			if res.StatusCode == http.StatusTooManyRequests {
+				if d, ok := parseRetryAfter(res.Header.Get("Retry-After"), time.Now()); ok {
+					retryAfter, useRetryAfter = d, true
+				}
+			}
 			// Drain & close so the connection can be reused.
 			_, _ = io.Copy(io.Discard, res.Body)
 			_ = res.Body.Close()
@@ -241,11 +283,21 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		// Backoff before next attempt (unless this was the last).
 		if attempt < max-1 {
 			apiRetries.WithLabelValues(endpoint).Inc()
-			// Jittered backoff: base ± 25% so concurrent clients don't
-			// retry in lockstep against a recovering upstream.
-			base := wait * time.Duration(1<<attempt)
-			jitter := time.Duration(rand.Int63n(int64(base)/2 + 1))
-			delay := base - base/4 + jitter
+			var delay time.Duration
+			if useRetryAfter {
+				// Honor the upstream's own pacing hint, capped so a bad
+				// value can't stall the scan.
+				delay = retryAfter
+				if delay > maxRetryAfter {
+					delay = maxRetryAfter
+				}
+			} else {
+				// Jittered backoff: base ± 25% so concurrent clients don't
+				// retry in lockstep against a recovering upstream.
+				base := wait * time.Duration(1<<attempt)
+				jitter := time.Duration(rand.Int63n(int64(base)/2 + 1))
+				delay = base - base/4 + jitter
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
