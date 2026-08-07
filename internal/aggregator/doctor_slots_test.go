@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/angelospk/find_doctors_server/internal/ministry"
@@ -13,6 +14,10 @@ import (
 
 func TestGetDoctorSlots_PayloadsAndFiltering(t *testing.T) {
 	var initPayload ministry.SlotsInitPayload
+	// GetDoctorSlots fans the per-group getactualslots calls out over goroutines,
+	// so the mock records them under a lock; without it the appends race and the
+	// length assertion below fails intermittently.
+	var mu sync.Mutex
 	var actualPayloads []ministry.GetActualSlotsPayload
 
 	mock := &MockMinistryClient{
@@ -26,7 +31,9 @@ func TestGetDoctorSlots_PayloadsAndFiltering(t *testing.T) {
 			}, nil
 		},
 		GetActualSlotsFunc: func(_ context.Context, p ministry.GetActualSlotsPayload) ([]ministry.ActualSlot, error) {
+			mu.Lock()
 			actualPayloads = append(actualPayloads, p)
+			mu.Unlock()
 			return []ministry.ActualSlot{{RVTime: "14:00", RVDate: "2026-06-26T13:00:00.000+0200", DocName: "ΓΙΑΤΡΟΣ", City: "ΘΕΣΣΑΛΟΝΙΚΗ", RVTName: "ΕΟΠΥΥ"}}, nil
 		},
 	}
