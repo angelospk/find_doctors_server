@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/angelospk/find_doctors_server/internal/aggregator"
@@ -13,8 +14,17 @@ import (
 
 // stubSlotClient captures the payload passed to FirstAvailableSlot so a test can
 // assert the date window (fromDate/toDate) flows into StartDate/EndDate.
+// FastScanner calls FirstAvailableSlot from several goroutines at once, so the
+// capture is guarded; the unsynchronised version raced under -race.
 type stubSlotClient struct {
+	mu              sync.Mutex
 	lastSlotPayload ministry.SearchPayload
+}
+
+func (s *stubSlotClient) lastPayload() ministry.SearchPayload {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastSlotPayload
 }
 
 func (s *stubSlotClient) SearchHUnits(_ context.Context, p ministry.SearchPayload) ([]ministry.HUnit, error) {
@@ -29,7 +39,9 @@ func (s *stubSlotClient) SearchHUnits(_ context.Context, p ministry.SearchPayloa
 	}}, nil
 }
 func (s *stubSlotClient) FirstAvailableSlot(_ context.Context, p ministry.SearchPayload) (string, error) {
+	s.mu.Lock()
 	s.lastSlotPayload = p
+	s.mu.Unlock()
 	return "2026-07-15", nil
 }
 func (s *stubSlotClient) GetSpecialties(context.Context) ([]ministry.Specialty, error) {
@@ -53,11 +65,11 @@ func TestHandleSmartSearch_DateWindow(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
-	if got, want := stub.lastSlotPayload.StartDate, "2026-07-10T00:00:00.000Z"; got != want {
+	if got, want := stub.lastPayload().StartDate, "2026-07-10T00:00:00.000Z"; got != want {
 		t.Errorf("StartDate = %q, want %q", got, want)
 	}
 	// toDate is the exclusive next-day boundary.
-	if got, want := stub.lastSlotPayload.EndDate, "2026-07-21T00:00:00.000Z"; got != want {
+	if got, want := stub.lastPayload().EndDate, "2026-07-21T00:00:00.000Z"; got != want {
 		t.Errorf("EndDate = %q, want %q", got, want)
 	}
 }
@@ -73,8 +85,8 @@ func TestHandleSmartSearch_NoDateWindowKeepsDefaults(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
-	if stub.lastSlotPayload.StartDate == "" || stub.lastSlotPayload.EndDate == "" {
-		t.Errorf("expected default StartDate/EndDate, got %q/%q", stub.lastSlotPayload.StartDate, stub.lastSlotPayload.EndDate)
+	if stub.lastPayload().StartDate == "" || stub.lastPayload().EndDate == "" {
+		t.Errorf("expected default StartDate/EndDate, got %q/%q", stub.lastPayload().StartDate, stub.lastPayload().EndDate)
 	}
 }
 
