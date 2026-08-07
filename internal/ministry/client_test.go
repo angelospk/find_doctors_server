@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestClient_SearchHUnits(t *testing.T) {
@@ -161,6 +163,78 @@ func TestClient_GetSlotsInit_Success(t *testing.T) {
 	}
 	if groups[1].GroupColor != "disabled" {
 		t.Errorf("Expected 'disabled', got '%s'", groups[1].GroupColor)
+	}
+}
+
+func TestClient_Retry429(t *testing.T) {
+	tests := []struct {
+		name       string
+		setHeader  func(w http.ResponseWriter)
+		minElapsed time.Duration
+		maxElapsed time.Duration // 0 = no upper bound check
+	}{
+		{
+			name:       "without Retry-After uses jittered backoff",
+			setHeader:  nil,
+			minElapsed: 0,
+			maxElapsed: 500 * time.Millisecond,
+		},
+		{
+			name: "with Retry-After delta-seconds",
+			setHeader: func(w http.ResponseWriter) {
+				w.Header().Set("Retry-After", "1")
+			},
+			minElapsed: time.Second,
+		},
+		{
+			name: "with Retry-After HTTP-date",
+			setHeader: func(w http.ResponseWriter) {
+				w.Header().Set("Retry-After", time.Now().Add(2*time.Second).UTC().Format(http.TimeFormat))
+			},
+			minElapsed: 900 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if n := atomic.AddInt32(&calls, 1); n == 1 {
+					if tt.setHeader != nil {
+						tt.setHeader(w)
+					}
+					w.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`[{"groupColor": "warning", "groupTitle": "Available"}]`))
+			}))
+			defer mockServer.Close()
+
+			client := NewClient(mockServer.URL)
+			// Keep the jittered fallback backoff tiny so the no-header case is fast.
+			client.RetryWait = 10 * time.Millisecond
+
+			start := time.Now()
+			groups, err := client.GetSlotsInit(context.Background(), SlotsInitPayload{})
+			elapsed := time.Since(start)
+
+			if err != nil {
+				t.Fatalf("expected success after retry, got %v", err)
+			}
+			if len(groups) != 1 {
+				t.Fatalf("expected 1 group, got %d", len(groups))
+			}
+			if got := atomic.LoadInt32(&calls); got != 2 {
+				t.Fatalf("expected 2 upstream calls (1 retry), got %d", got)
+			}
+			if elapsed < tt.minElapsed {
+				t.Fatalf("expected delay >= %v (Retry-After respected), got %v", tt.minElapsed, elapsed)
+			}
+			if tt.maxElapsed > 0 && elapsed > tt.maxElapsed {
+				t.Fatalf("expected fast jittered backoff <= %v, got %v", tt.maxElapsed, elapsed)
+			}
+		})
 	}
 }
 
