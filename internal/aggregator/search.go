@@ -263,6 +263,13 @@ func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, pa
 	var filtered []ScannedUnit
 	if opts.MaxDistance > 0 && opts.Lat != nil && opts.Lon != nil {
 		for _, u := range scanned {
+			// Units whose upstream record lacks usable coordinates have an
+			// unknown location, not a distant one — keep them rather than
+			// silently dropping valid results with a bogus 0/0 distance.
+			if !hasCoords(u.Latitude, u.Longitude) {
+				filtered = append(filtered, u)
+				continue
+			}
 			d := distance(*opts.Lat, *opts.Lon, u.Latitude, u.Longitude)
 			if d <= opts.MaxDistance {
 				filtered = append(filtered, u)
@@ -286,6 +293,15 @@ func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, pa
 			return *filtered[i].FirstDate < *filtered[j].FirstDate
 		}
 		if opts.Lat != nil && opts.Lon != nil {
+			iHas := hasCoords(filtered[i].Latitude, filtered[i].Longitude)
+			jHas := hasCoords(filtered[j].Latitude, filtered[j].Longitude)
+			// Units with an unknown location sort after those we can rank by distance.
+			if iHas != jHas {
+				return iHas
+			}
+			if !iHas {
+				return false
+			}
 			distI := distance(*opts.Lat, *opts.Lon, filtered[i].Latitude, filtered[i].Longitude)
 			distJ := distance(*opts.Lat, *opts.Lon, filtered[j].Latitude, filtered[j].Longitude)
 			return distI < distJ
