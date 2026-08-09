@@ -14,6 +14,12 @@ func distance(lat1, lon1, lat2, lon2 float64) float64 {
 	return R * c
 }
 
+// RoundKm rounds a kilometer distance to one decimal place, with halves
+// rounding away from zero (1.25 -> 1.3).
+func RoundKm(km float64) float64 {
+	return math.Round(km*10) / 10
+}
+
 // hasCoords reports whether a lat/lon pair carries usable geographic data.
 // A 0/0 record (the upstream default for a missing location) and any NaN
 // component are treated as "unknown" rather than a real point off West Africa.
