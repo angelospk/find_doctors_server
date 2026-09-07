@@ -5,3 +5,10 @@ review.txt
 server.log
 # Local security analysis of the upstream government API — never commit/publish
 review.md
+ministry-session.txt
+node_modules/
+.env
+
+# The compiled server. It was committed once, at 15 MB, and every rebuild since
+# has shown up as a binary diff nobody can read or review.
+/aggregator_server

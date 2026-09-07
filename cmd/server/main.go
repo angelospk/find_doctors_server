@@ -136,6 +136,7 @@ func main() {
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/capacity", server.HandleHospitalCapacity)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/slots", server.HandleGranularSlots)
 	mux.HandleFunc("GET /api/hospitals/{hunitId}/doors", server.HandleClinicDoors)
+	mux.HandleFunc("GET /api/doctors/{amka}/slots", server.HandleDoctorSlots)
 
 	mux.HandleFunc("GET /api/heatmap", server.HandleNationwideHeatmap)
 

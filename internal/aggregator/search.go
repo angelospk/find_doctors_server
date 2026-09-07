@@ -394,7 +394,7 @@ func (a *Aggregator) GetGranularSlots(ctx context.Context, hunitID, foreasID int
 				Day:          day,
 				DDate:        startDay.Format("2006-01-02T15:04:05.000Z"),
 				GroupID:      groupID,
-				HUnit:        hunitID,
+				HUnit:        &hunitID,
 				Foreas:       foreasID,
 				SpecialityID: specialtyID,
 				PrefectureID: pID,
@@ -441,6 +441,96 @@ func (a *Aggregator) GetGranularSlots(ctx context.Context, hunitID, foreasID int
 		return allSlots[i].Time < allSlots[j].Time
 	})
 
+	return allSlots, nil
+}
+
+// GetDoctorSlots fetches available appointment times for a private ΕΟΠΥΥ doctor
+// (foreasID 19), keyed by the doctor's ΑΜΚΑ via i_amka (no hunit). Mirrors
+// GetGranularSlots but drives the i_amka payloads. Verified live 2026-06-25.
+func (a *Aggregator) GetDoctorSlots(ctx context.Context, amka string, foreasID int, prefID *int, specialtyID int, date string) ([]GranularSlot, error) {
+	parsedDate, err := ParseFlexibleDate(date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format: %w", err)
+	}
+
+	startDay := parsedDate.Truncate(24 * time.Hour)
+	endDay := startDay.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	groups, err := a.client.GetSlotsInit(ctx, ministry.SlotsInitPayload{
+		StartDate:    startDay.Format("2006-01-02T15:04:05.000Z"),
+		EndDate:      endDay.Format("2006-01-02T15:04:05.000Z"),
+		SpecialityID: specialtyID,
+		PrefectureID: prefID,
+		ForeasID:     foreasID,
+		IAmka:        &amka,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	pID := 0
+	if prefID != nil {
+		pID = *prefID
+	}
+
+	type result struct {
+		groupID int
+		slots   []ministry.ActualSlot
+		err     error
+	}
+	resChan := make(chan result, 12)
+	var wg sync.WaitGroup
+
+	for _, g := range groups {
+		if g.Day > 0 && g.Day != int(parsedDate.Weekday()) {
+			continue
+		}
+		if g.GroupColor == "" || g.GroupColor == "disabled" {
+			continue
+		}
+		wg.Add(1)
+		go func(day, groupID int) {
+			defer wg.Done()
+			// getactualslots wants a date-only ddate + lowercase-d keys (see payload doc).
+			slots, err := a.client.GetActualSlots(ctx, ministry.GetActualSlotsPayload{
+				Day:          day,
+				DDate:        startDay.Format("2006-01-02"),
+				GroupID:      groupID,
+				Foreas:       foreasID,
+				SpecialityID: specialtyID,
+				PrefectureID: pID,
+				IAmka:        &amka,
+			})
+			resChan <- result{groupID: groupID, slots: slots, err: err}
+		}(g.Day, g.GroupID)
+	}
+
+	wg.Wait()
+	close(resChan)
+
+	var allSlots []GranularSlot
+	for r := range resChan {
+		if r.err != nil {
+			a.logger.Warn("doctor actual slots fetch failed", "group_id", r.groupID, "amka", amka, "error", r.err)
+			continue
+		}
+		for _, s := range r.slots {
+			allSlots = append(allSlots, GranularSlot{
+				HUnitID:   s.HUnitID,
+				Time:      s.RVTime,
+				Date:      s.RVDate,
+				DayOfWeek: int(parsedDate.Weekday()),
+				DocName:   s.DocName,
+				Address:   s.Address,
+				City:      s.City,
+				GroupID:   r.groupID,
+				Comments:  fmt.Sprintf("%s %s", deref(s.Comments), deref(s.Comments2)),
+				RVTName:   s.RVTName,
+			})
+		}
+	}
+
+	sort.Slice(allSlots, func(i, j int) bool { return allSlots[i].Time < allSlots[j].Time })
 	return allSlots, nil
 }
 
