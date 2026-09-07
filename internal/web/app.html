@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Πότε είναι το πιο κοντινό ραντεβού</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --ink: #14181f; --muted: #667085;
+    --line: #e4e7ec; --accent: #0b6bcb; --accent-soft: #e7f0fb;
+    --warn: #8a5a00; --warn-soft: #fff5e0; --bad: #b42318;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --card: #171b22; --ink: #e8ebef; --muted: #98a2b3;
+      --line: #262c36; --accent: #6aa9ec; --accent-soft: #16232f;
+      --warn: #f0c26b; --warn-soft: #2a2216; --bad: #f0776a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 32px);
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+  }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  select, input, button {
+    font: inherit; width: 100%; padding: 11px 12px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card); color: var(--ink);
+  }
+  .field + .field { margin-top: 12px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; min-width: 0; }
+  button {
+    background: var(--accent); color: #fff; border-color: transparent;
+    font-weight: 600; cursor: pointer; margin-top: 14px;
+  }
+  button[disabled] { opacity: .55; cursor: default; }
+  button.quiet {
+    background: transparent; color: var(--accent);
+    border-color: var(--line); margin-top: 8px;
+  }
+  button.link {
+    background: none; border: none; color: var(--accent); width: auto;
+    padding: 0; margin: 0; font-size: 13px; font-weight: 600; text-decoration: underline;
+  }
+  .result { border-top: 1px solid var(--line); padding: 14px 0; }
+  .result:first-of-type { border-top: none; }
+  .result h3 { margin: 0 0 2px; font-size: 15px; font-weight: 700; line-height: 1.35; }
+  .where { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+  .when { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .date { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+  .date.none { font-size: 14px; font-weight: 600; color: var(--muted); }
+  .tag {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; padding: 3px 8px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .tag.grey { background: var(--line); color: var(--muted); }
+  .note { background: var(--warn-soft); color: var(--warn); font-size: 13px;
+          padding: 10px 12px; border-radius: 10px; margin: 12px 0 0; }
+  .bad { color: var(--bad); font-size: 14px; }
+  .slots { margin-top: 10px; padding-left: 0; list-style: none; }
+  .slots li { padding: 8px 0; border-top: 1px dashed var(--line); font-size: 14px; }
+  .slots li:first-child { border-top: none; }
+  .slots .t { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .slots .doc { color: var(--muted); }
+  .actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .actions button { margin-top: 0; width: auto; padding: 8px 14px; font-size: 14px; }
+  footer { color: var(--muted); font-size: 12px; padding: 8px 16px 0; max-width: 720px; margin: 0 auto; }
+  footer a { color: var(--muted); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Πότε είναι το πιο κοντινό ραντεβού</h1>
+  <p class="lede">
+    Ψάχνει ταυτόχρονα δημόσια νοσοκομεία και κέντρα υγείας, σε όλη τη χώρα ή γύρω
+    σου, και τα βάζει σε σειρά από το συντομότερο ραντεβού.
+  </p>
+
+  <form class="card" id="form">
+    <div class="field">
+      <label for="specialty">Ειδικότητα</label>
+      <select id="specialty" required>
+        <option value="">Φόρτωση…</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="prefecture">Νομός</label>
+      <select id="prefecture">
+        <option value="">Όλη η Ελλάδα</option>
+      </select>
+    </div>
+
+    <div class="field row">
+      <div>
+        <label for="distance">Πόσο μακριά</label>
+        <select id="distance" disabled title="Χρειάζεται πρώτα η τοποθεσία σου">
+          <option value="">Χωρίς όριο</option>
+          <option value="10">έως 10 χλμ</option>
+          <option value="25">έως 25 χλμ</option>
+          <option value="50">έως 50 χλμ</option>
+          <option value="100">έως 100 χλμ</option>
+        </select>
+      </div>
+      <div>
+        <label for="locate">Από πού</label>
+        <button type="button" class="quiet" id="locate" style="margin-top:0">
+          Βρες με
+        </button>
+      </div>
+    </div>
+    <p class="lede" id="where-from" style="margin:8px 0 0"></p>
+
+    <button type="submit" id="go">Δες πού υπάρχει ραντεβού</button>
+  </form>
+
+  <div id="status" aria-live="polite"></div>
+  <div id="results"></div>
+</main>
+
+<footer>
+  Τα δεδομένα έρχονται ζωντανά από το finddoctors.gov.gr. Αυτή η σελίδα δεν
+  κλείνει ραντεβού και δεν κρατάει θέση — το ραντεβού κλείνεται στην επίσημη
+  πύλη. Οι αποστάσεις είναι σε ευθεία γραμμή, όχι οδικές.
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var els = {
+    form: document.getElementById('form'),
+    specialty: document.getElementById('specialty'),
+    prefecture: document.getElementById('prefecture'),
+    distance: document.getElementById('distance'),
+    locate: document.getElementById('locate'),
+    whereFrom: document.getElementById('where-from'),
+    go: document.getElementById('go'),
+    status: document.getElementById('status'),
+    results: document.getElementById('results')
+  };
+
+  // Where the person is, once they have said so. Held in memory only: this
+  // page stores nothing about anybody.
+  var origin = null;
+
+  function api(path) {
+    return fetch(path, { headers: { Accept: 'application/json' } }).then(function (r) {
+      return r.json().then(function (body) {
+        if (!r.ok) {
+          var e = (body && body.error) || {};
+          throw new Error(e.message || ('Σφάλμα ' + r.status));
+        }
+        return body;
+      }, function () {
+        throw new Error('Ο διακομιστής απάντησε κάτι που δεν διαβάζεται.');
+      });
+    });
+  }
+
+  function say(html, cls) {
+    els.status.innerHTML = html ? '<div class="card ' + (cls || '') + '">' + html + '</div>' : '';
+  }
+
+  function fill(select, rows, valueOf, labelOf, keepFirst) {
+    var first = keepFirst ? select.options[0] : null;
+    select.innerHTML = '';
+    if (first) select.appendChild(first);
+    rows.forEach(function (row) {
+      var o = document.createElement('option');
+      o.value = String(valueOf(row));
+      o.textContent = labelOf(row);
+      select.appendChild(o);
+    });
+  }
+
+  // Names arrive SHOUTED in capitals, and they stay that way.
+  //
+  // Title-casing them was tried and reverted: Greek capitals carry no accents,
+  // so lowercasing ΒΟΥΛΑΣ gives "βουλας" and there is no way back to "Βούλας".
+  // The result read as a typo on every line. Institutions in Greece are written
+  // in capitals anyway; upstream's shouting is the least wrong option.
+
+  var DAYS = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
+  var MONTHS = ['Ιαν', 'Φεβ', 'Μαρ', 'Απρ', 'Μαΐ', 'Ιουν', 'Ιουλ', 'Αυγ', 'Σεπ', 'Οκτ', 'Νοε', 'Δεκ'];
+
+  function readableDate(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    if (!m) return iso || '';
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()];
+  }
+
+  // How far away the date is, which is the thing people actually compare.
+  function daysAway(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    if (!m) return null;
+    var then = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    var now = new Date();
+    var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((then - today) / 86400000);
+  }
+
+  function waitLabel(iso) {
+    var n = daysAway(iso);
+    if (n === null) return '';
+    if (n <= 0) return 'σήμερα';
+    if (n === 1) return 'αύριο';
+    if (n < 14) return 'σε ' + n + ' μέρες';
+    if (n < 60) return 'σε ' + Math.round(n / 7) + ' εβδομάδες';
+    return 'σε ' + Math.round(n / 30) + ' μήνες';
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // Discovery lists. Both are cheap and cached upstream for a day.
+  Promise.all([api('/api/specialties'), api('/api/prefectures')]).then(function (out) {
+    var specialties = out[0] || [];
+    specialties.sort(function (a, b) { return a.name.localeCompare(b.name, 'el'); });
+    fill(els.specialty, specialties, function (s) { return s.speciality; },
+      function (s) { return s.name; }, false);
+    els.specialty.insertAdjacentHTML('afterbegin', '<option value="">Διάλεξε ειδικότητα</option>');
+    els.specialty.value = '';
+
+    var prefectures = out[1] || [];
+    prefectures.sort(function (a, b) { return a.name.localeCompare(b.name, 'el'); });
+    fill(els.prefecture, prefectures, function (p) { return p.id; },
+      function (p) { return p.name; }, true);
+  }).catch(function () {
+    // The upstream message is an English sentence about an HTTP status. It says
+    // nothing to the person reading it, and what they need to know is which of
+    // the two things went wrong: not "no doctors", but "could not ask".
+    els.specialty.innerHTML = '<option value="">Δεν φόρτωσε</option>';
+    say('Δεν μπόρεσα να διαβάσω τις λίστες ειδικοτήτων και νομών από το ' +
+      'σύστημα του υπουργείου. Δοκίμασε ξανά σε λίγο — δεν σημαίνει ότι δεν ' +
+      'υπάρχουν ραντεβού, σημαίνει ότι δεν μπόρεσα να ρωτήσω.', 'bad');
+  });
+
+  els.locate.addEventListener('click', function () {
+    if (!navigator.geolocation) {
+      els.whereFrom.textContent = 'Η συσκευή δεν δίνει τοποθεσία. Διάλεξε νομό.';
+      return;
+    }
+    els.locate.disabled = true;
+    els.locate.textContent = 'Ψάχνω…';
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      els.locate.textContent = 'Από εδώ ✓';
+      els.locate.disabled = false;
+      els.whereFrom.textContent = 'Οι αποστάσεις μετριούνται από τη θέση σου.';
+      // The radius means nothing without a point to measure from. It used to be
+      // selectable anyway and was then dropped from the query, so choosing
+      // "έως 10 χλμ" quietly searched the whole country.
+      els.distance.disabled = false;
+      if (!els.distance.value) els.distance.value = '50';
+    }, function () {
+      els.locate.textContent = 'Βρες με';
+      els.locate.disabled = false;
+      els.whereFrom.textContent = 'Δεν δόθηκε τοποθεσία. Διάλεξε νομό αντί για απόσταση.';
+    }, { timeout: 10000, maximumAge: 300000 });
+  });
+
+  els.form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var specialtyId = els.specialty.value;
+    if (!specialtyId) {
+      say('Διάλεξε πρώτα ειδικότητα.');
+      return;
+    }
+
+    // The API pages at 50 by default and caps at 200. Asking for the cap keeps
+    // the common case in one request; anything beyond it is reported rather
+    // than silently dropped, because failed scans sort last and a page break
+    // would hide exactly the rows the banner is counting.
+    var PAGE = 200;
+    var q = ['specialtyId=' + encodeURIComponent(specialtyId), 'limit=' + PAGE];
+    if (els.prefecture.value) q.push('prefectureId=' + encodeURIComponent(els.prefecture.value));
+    if (origin) {
+      q.push('lat=' + origin.lat, 'lon=' + origin.lon);
+      if (els.distance.value) q.push('maxDistanceInKm=' + els.distance.value);
+    }
+
+    els.go.disabled = true;
+    els.results.innerHTML = '';
+    say('Ρωτάω κάθε μονάδα ξεχωριστά. Κρατάει λίγο.');
+
+    var askedAt = new Date();
+    api('/api/search?' + q.join('&')).then(function (body) {
+      render(body, specialtyId, askedAt);
+    }).catch(function (e) {
+      say('Δεν ήρθαν αποτελέσματα. <span class="lede">Αυτό σημαίνει ότι δεν ' +
+        'μπόρεσα να ρωτήσω, όχι ότι δεν υπάρχει ραντεβού.</span>', 'bad');
+      console.warn('search failed:', e.message);
+    }).finally(function () {
+      els.go.disabled = false;
+    });
+  });
+
+  function render(body, specialtyId, askedAt) {
+    var rows = (body && body.data) || [];
+    var total = (body && body.meta && body.meta.total) || rows.length;
+    var shown = rows.length;
+
+    if (!rows.length) {
+      say('Καμία μονάδα με αυτά τα κριτήρια. Δοκίμασε άλλον νομό ή μεγαλύτερη απόσταση.');
+      return;
+    }
+
+    // A unit whose availability check failed is not a unit with no
+    // appointments. Keeping the two apart is the whole point of scanOk.
+    var unchecked = rows.filter(function (u) { return u.scanOk === false; }).length;
+    var when = askedAt.toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' });
+    var head = shown < total
+      ? 'Βρέθηκαν ' + total + ' μονάδες, δείχνω τις ' + shown + ' με το συντομότερο ραντεβού.'
+      : 'Βρέθηκαν ' + total + ' μονάδες.';
+    say(head + ' Ελέγχθηκαν στις ' + when + '.' +
+      (shown < total ? '<div class="note">Οι υπόλοιπες ' + (total - shown) + ' δεν χωρούν σε μία σελίδα. Στένεψε τον νομό ή την απόσταση για να τις δεις.</div>' : '') +
+      (unchecked ? '<div class="note">Σε ' + unchecked + ' από αυτές δεν απάντησε το σύστημα του υπουργείου. Εμφανίζονται χωρίς ημερομηνία — δεν σημαίνει ότι δεν έχουν ραντεβού.</div>' : ''));
+
+    var host = document.createElement('div');
+    host.className = 'card';
+    rows.forEach(function (u) { host.appendChild(resultCard(u, specialtyId)); });
+    els.results.appendChild(host);
+  }
+
+  function resultCard(u, specialtyId) {
+    var box = document.createElement('div');
+    box.className = 'result';
+
+    var isHospital = u.foreasId === 1;
+    var kind = isHospital ? 'Νοσοκομείο' : 'Κέντρο υγείας';
+    var place = [(u.city || ''), u.address || ''].filter(Boolean).join(' · ');
+    var dist = typeof u.distanceKm === 'number'
+      ? ' · ' + (u.distanceKm < 10 ? u.distanceKm.toFixed(1) : Math.round(u.distanceKm)) + ' χλμ'
+      : '';
+
+    var head = '<h3>' + esc((u.name || '')) + '</h3>' +
+      '<p class="where">' + esc(place) + esc(dist) + '</p><div class="when">';
+
+    if (u.firstDate) {
+      head += '<span class="date">' + esc(readableDate(u.firstDate)) + '</span>' +
+        '<span class="tag">' + esc(waitLabel(u.firstDate)) + '</span>';
+    } else if (u.scanOk === false) {
+      head += '<span class="date none">Δεν απάντησε το σύστημα</span>';
+    } else {
+      head += '<span class="date none">Καμία ελεύθερη ώρα</span>';
+    }
+    head += '<span class="tag grey">' + esc(kind) + '</span></div>';
+    box.innerHTML = head;
+
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    box.appendChild(actions);
+
+    if (u.firstDate) {
+      var times = document.createElement('button');
+      times.type = 'button';
+      times.className = 'quiet';
+      times.textContent = 'Δες ώρες';
+      times.addEventListener('click', function () {
+        times.disabled = true;
+        times.textContent = 'Φορτώνω…';
+        showSlots(box, u, specialtyId, times);
+      });
+      actions.appendChild(times);
+
+      var alert = document.createElement('button');
+      alert.type = 'button';
+      alert.className = 'quiet';
+      // Not "πες μου": a watch created from here has no Telegram id and no
+      // webhook, so nothing is pushed anywhere. It is a thing that keeps
+      // checking and that you come back and read.
+      alert.textContent = 'Κράτα το υπό παρακολούθηση';
+      alert.addEventListener('click', function () { createWatch(box, u, specialtyId, alert); });
+      actions.appendChild(alert);
+    }
+
+    var portal = document.createElement('button');
+    portal.type = 'button';
+    portal.className = 'quiet';
+    portal.textContent = 'Κλείσε στην επίσημη πύλη';
+    portal.addEventListener('click', function () {
+      window.open('https://www.finddoctors.gov.gr/', '_blank', 'noopener');
+    });
+    actions.appendChild(portal);
+
+    return box;
+  }
+
+  function hunitOf(u) {
+    // The upstream sends hunitId sometimes as a number and sometimes as a
+    // zero-padded string ("025"); the slot endpoint wants the numeric hunit.
+    return u.hunit != null ? u.hunit : u.hunitId;
+  }
+
+  function showSlots(box, u, specialtyId, trigger) {
+    var q = [
+      'specialtyId=' + encodeURIComponent(specialtyId),
+      'date=' + encodeURIComponent(u.firstDate),
+      'foreasId=' + encodeURIComponent(u.foreasId)
+    ];
+    if (u.prefecture != null) q.push('prefectureId=' + encodeURIComponent(u.prefecture));
+
+    api('/api/hospitals/' + encodeURIComponent(hunitOf(u)) + '/slots?' + q.join('&'))
+      .then(function (slots) {
+        trigger.remove();
+        var list = document.createElement('ul');
+        list.className = 'slots';
+        if (!slots || !slots.length) {
+          list.innerHTML = '<li>Οι ώρες δεν ήρθαν. Η ημερομηνία παραπάνω ισχύει· δες τη στην πύλη.</li>';
+        } else {
+          slots.slice(0, 12).forEach(function (s) {
+            var li = document.createElement('li');
+            li.innerHTML = '<span class="t">' + esc(s.time) + '</span>' +
+              (s.docName ? ' <span class="doc">' + esc(s.docName) + '</span>' : '') +
+              (s.comments ? '<br><span class="doc">' + esc(s.comments) + '</span>' : '');
+            list.appendChild(li);
+          });
+          if (slots.length > 12) {
+            var more = document.createElement('li');
+            more.className = 'doc';
+            more.textContent = 'και άλλες ' + (slots.length - 12) + ' ώρες την ίδια μέρα.';
+            list.appendChild(more);
+          }
+        }
+        box.appendChild(list);
+      })
+      .catch(function (e) {
+        trigger.disabled = false;
+        trigger.textContent = 'Δες ώρες';
+        var p = document.createElement('p');
+        p.className = 'note';
+        p.textContent = 'Οι ώρες δεν ήρθαν: ' + e.message;
+        box.appendChild(p);
+      });
+  }
+
+  function createWatch(box, u, specialtyId, trigger) {
+    trigger.disabled = true;
+    trigger.textContent = 'Ορίζω…';
+    fetch('/api/watches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hunitId: Number(hunitOf(u)),
+        specialtyId: Number(specialtyId),
+        foreasId: Number(u.foreasId),
+        prefectureId: u.prefecture != null ? Number(u.prefecture) : undefined
+      })
+    }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.body.error && res.body.error.message) || 'δεν ορίστηκε');
+        trigger.remove();
+
+        var p = document.createElement('p');
+        p.className = 'note';
+        // Every clause here is a limit, and every one of them was a promise
+        // this button made before somebody read the code behind it. There is no
+        // notification: a watch created from a browser carries no Telegram id
+        // and no webhook, so it is checked by coming back and pressing below.
+        // The baseline is the server's, not `u.firstDate` — the server seeds it
+        // with its own check and the two can differ.
+        p.innerHTML = 'Παρακολουθείται. Θα ξαναελέγχεται κάθε λίγα λεπτά και θα ' +
+          'κρατάει την πιο πρώιμη ημερομηνία που θα δει, από ' +
+          esc(readableDate(res.body.currentDate || u.firstDate)) + ' και πριν.' +
+          '<br><span class="lede">Δεν στέλνει ειδοποίηση από μόνο του και δεν ' +
+          'κρατάει θέση. Γύρνα εδώ και πάτα «Δες αν άλλαξε», ή κράτα τον κωδικό ' +
+          '<code>' + esc(res.body.id) + '</code>.</span>';
+        box.appendChild(p);
+
+        var check = document.createElement('button');
+        check.type = 'button';
+        check.className = 'quiet';
+        check.textContent = 'Δες αν άλλαξε';
+        check.addEventListener('click', function () {
+          check.disabled = true;
+          api('/api/watches/' + encodeURIComponent(res.body.id)).then(function (w) {
+            check.disabled = false;
+            var moved = w.currentDate && w.currentDate !== (res.body.currentDate || u.firstDate);
+            p.innerHTML = moved
+              ? '<strong>Άνοιξε νωρίτερα: ' + esc(readableDate(w.currentDate)) + '.</strong> ' +
+                'Κλείσε το στην επίσημη πύλη.'
+              : 'Καμία αλλαγή. Η πιο πρώιμη ημερομηνία είναι ακόμα ' +
+                esc(readableDate(w.currentDate)) + '.' +
+                '<br><span class="lede">Τελευταίος έλεγχος: ' +
+                esc(w.lastCheckedAt ? new Date(w.lastCheckedAt).toLocaleString('el-GR') : 'δεν έχει γίνει ακόμα') +
+                '.</span>';
+          }).catch(function () {
+            check.disabled = false;
+            p.innerHTML += '<br>Ο έλεγχος δεν απάντησε. Δοκίμασε ξανά.';
+          });
+        });
+        actions.appendChild(check);
+      })
+      .catch(function (e) {
+        trigger.disabled = false;
+        trigger.textContent = 'Κράτα το υπό παρακολούθηση';
+        var p = document.createElement('p');
+        p.className = 'note';
+        p.textContent = 'Η ειδοποίηση δεν ορίστηκε: ' + e.message;
+        box.appendChild(p);
+      });
+  }
+})();
+</script>
+</body>
+</html>

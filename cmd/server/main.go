@@ -20,6 +20,7 @@ import (
 	"github.com/angelospk/find_doctors_server/internal/api"
 	"github.com/angelospk/find_doctors_server/internal/ministry"
 	"github.com/angelospk/find_doctors_server/internal/watch"
+	"github.com/angelospk/find_doctors_server/internal/web"
 )
 
 func main() {
@@ -116,6 +117,13 @@ func main() {
 	mux.HandleFunc("GET /livez", server.HandleHealthz)
 	mux.HandleFunc("GET /readyz", server.HandleReadyz)
 	mux.HandleFunc("GET /healthz/upstream", server.HandleUpstreamHealth)
+
+	// The app itself. `GET /{$}` matches the root and nothing else — a bare
+	// `GET /` is a subtree pattern in Go's mux and would win against the JSON
+	// 404 handler below for every unknown GET path, so `/api/serch` would come
+	// back as plain-text HTML-server 404 instead of the error envelope every
+	// other mistake returns.
+	mux.Handle("GET /{$}", web.Handler())
 
 	mux.HandleFunc("GET /api/search", server.HandleSmartSearch)
 	mux.HandleFunc("GET /api/specialties", server.HandleGetSpecialties)

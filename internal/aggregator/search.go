@@ -201,6 +201,14 @@ type ScannedUnit struct {
 	ministry.HUnit
 	FirstDate *string `json:"firstDate"`
 	ScanOK    bool    `json:"scanOk"` // false if the upstream availability check failed
+	// DistanceKm is the great-circle distance from the caller's lat/lon, in
+	// kilometres. Absent when the caller gave no location, and absent when the
+	// unit's upstream record has no usable coordinates — a unit at 0,0 has an
+	// unknown location, and a zero here would read as "next door".
+	//
+	// It is a straight line, not a drive. Naming it distanceKm rather than
+	// travelKm is the whole of the promise.
+	DistanceKm *float64 `json:"distanceKm,omitempty"`
 }
 
 // FastScanner concurrently checks the first available slot for a list of units.
@@ -260,18 +268,29 @@ type SmartSearchOptions struct {
 func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, payload ministry.SearchPayload, opts SmartSearchOptions) []ScannedUnit {
 	scanned := a.FastScanner(ctx, units, payload)
 
+	// Measured before filtering, so a result that survives carries the figure
+	// the filter used rather than one computed a second time somewhere else.
+	if opts.Lat != nil && opts.Lon != nil {
+		for i := range scanned {
+			if !hasCoords(scanned[i].Latitude, scanned[i].Longitude) {
+				continue
+			}
+			d := distance(*opts.Lat, *opts.Lon, scanned[i].Latitude, scanned[i].Longitude)
+			scanned[i].DistanceKm = &d
+		}
+	}
+
 	var filtered []ScannedUnit
 	if opts.MaxDistance > 0 && opts.Lat != nil && opts.Lon != nil {
 		for _, u := range scanned {
 			// Units whose upstream record lacks usable coordinates have an
 			// unknown location, not a distant one — keep them rather than
 			// silently dropping valid results with a bogus 0/0 distance.
-			if !hasCoords(u.Latitude, u.Longitude) {
+			if u.DistanceKm == nil {
 				filtered = append(filtered, u)
 				continue
 			}
-			d := distance(*opts.Lat, *opts.Lon, u.Latitude, u.Longitude)
-			if d <= opts.MaxDistance {
+			if *u.DistanceKm <= opts.MaxDistance {
 				filtered = append(filtered, u)
 			}
 		}

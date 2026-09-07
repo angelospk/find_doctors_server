@@ -13,6 +13,30 @@ This server acts as a specialized proxy that fixes the primary limitation of the
 - **Type Safety**: End-to-end type safety from Go to TypeScript via `tygo`.
 - **TDD-Backed**: 100% test coverage for core logic and aggregator sorting algorithms.
 
+## The app
+
+`GET /` serves a single Greek-language page: choose a specialty, optionally a
+prefecture or your own location and a radius, and get every public hospital and
+primary-care centre ranked by how soon they can see you — with the wait in
+plain words ("σε 2 μέρες", "σε 3 μήνες"), the times for that date, and a way to
+set an earlier-date alert.
+
+It is one embedded HTML file (`internal/web/app.html`), no build step and no
+node_modules. One person maintains this; a bundler that rots is worse than
+markup that is a bit long.
+
+Two things it says out loud, because both are easy to get wrong:
+
+- A unit whose availability check failed is shown **without a date**, labelled
+  "δεν απάντησε το σύστημα". That is not the same as "no appointments", and the
+  banner above the results says how many were in that state.
+- A watch created from the page has no Telegram id and no webhook, so **nothing
+  is pushed anywhere**. The button says "κράτα το υπό παρακολούθηση" rather than
+  "πες μου", and puts a "δες αν άλλαξε" button next to it that reads the watch
+  back. Pushed alerts need `POST /api/watches` with a `telegramChatId`.
+- The page does not book anything and does not hold a slot. Every result has a
+  link to the official portal, where the booking actually happens.
+
 ## 🚀 API Endpoints
 
 > **Requires Go 1.26+ to build** (see `go.mod`).
@@ -64,12 +88,18 @@ Fetch the live list from `GET /api/foreas`.
 Queries Public Hospitals and Primary Care in parallel, then ranks by soonest slot
 within the distance filter. Params: `specialtyId` (**required**), `lat`/`lon`,
 `maxDistanceInKm`, `prefectureId` (all optional). Supports pagination.
+
+`distanceKm` is present only when `lat`/`lon` were given **and** the unit's
+upstream record has usable coordinates. It is a great-circle distance, not a
+driving distance. `scanOk: false` means the availability check for that unit
+failed — the unit is kept, with a null `firstDate`, because "we could not ask"
+is not "there is nothing".
 ```json
 { "data": [
   { "hunitId": "025", "hunit": 65, "hunittype": 1,
     "name": "Γ.Ν. ΑΣΚΛΗΠΙΕΙΟ ΒΟΥΛΑΣ", "city": "ΒΟΥΛΑ", "zip": "16673",
     "phone1": "", "address": "...", "foreasId": 1,
-    "firstDate": "2026-06-09", "distanceKm": 12.4 }
+    "firstDate": "2026-06-09", "scanOk": true, "distanceKm": 12.4 }
 ], "meta": { "total": 30, "limit": 50, "offset": 0 } }
 ```
 
@@ -130,12 +160,15 @@ coordinates. `specialtyId` **required**; `firstName`/`lastName` optional filters
 (≤100 chars). Paginated `{data, meta}`. Empty result is `{"data":[],"meta":{...}}`,
 not a placeholder row.
 
-#### Doctor Nearby *(experimental)*
+#### Doctor Nearby *(deprecated)*
 `GET /api/doctors/nearby?specialtyId=24&lat=37.9&lon=23.7&distance=10&foreasId=19`
 
-Geo variant via the Ministry `searchdoctors/currentlocation` endpoint. ⚠️ The
-upstream geo endpoint currently rejects requests (`400`/`500`) regardless of
-payload, so this surfaces a `502` — left wired for when upstream is fixed.
+Geo variant via the Ministry `searchdoctors/currentlocation` endpoint. **It has
+never returned a result**: upstream rejects every payload with a `400` or a
+`500`, so this always surfaces a `502`. Responses carry an RFC 9745
+`Deprecation: @1757203200` header and a `Link` header pointing at `/api/search`,
+which takes `lat`/`lon` and does the distance filtering on this side. The wiring stays because it is correct and
+costs nothing — but do not build against it.
 
 #### Family / Personal Doctor
 `GET /api/family-doctors/search?specialtyId=24&prefectureId=5`
@@ -165,11 +198,16 @@ Both return a bare array of units.
 | `GET /api/prefectures/covid` | Prefectures with COVID vaccination centres. |
 | `GET /api/prefectures/mental-health` | Prefectures with mental-health units. |
 
-### Cancellation Watchdog (ICYMI)
+### Earlier-date alerts
 
 Register a watch on a specific unit + specialty; a background poller re-checks the
-first-available date and alerts you when an **earlier** slot appears (e.g. after a
-cancellation). Notifications go to Telegram and/or a webhook; either way the current
+first-available date and alerts you when an **earlier** date appears.
+
+The name matters. This was called the "cancellation watchdog", which promises
+more than it does: an earlier date usually comes from a newly released schedule
+rather than from somebody cancelling, it watches one unit and one specialty
+rather than searching for alternatives, and it does not notice a new time
+opening up on a date it already knows about. Notifications go to Telegram and/or a webhook; either way the current
 state is always readable via `GET`.
 
 `POST /api/watches`
@@ -222,6 +260,24 @@ tygo generate
 go run ./cmd/server/main.go
 ```
 The server will be available at `http://localhost:8080`.
+
+## Before this is exposed publicly
+
+It runs on one machine, for one person. Three things would have to change first,
+and none of them is urgent while that stays true:
+
+- **`/api/doctors/search` returns each physician's AMKA**, because upstream does.
+  A doctor's AMKA is still personal data, and republishing it to anyone who can
+  reach the port is a different act from the ministry publishing it behind their
+  own portal. The slot lookup for private ΕΟΠΥΥ doctors needs the identifier, so
+  removing it means introducing an opaque server-side reference — worth doing
+  before a public deployment, not before that.
+- **`GET /api/doctors/{amka}/slots` puts that identifier in the URL**, which means
+  in every access log and every proxy in front of it.
+- **The TaxisNet bridge is single-user by construction.** It proxies calls through
+  *Harold's* logged-in browser session. Sharing that session among visitors would
+  be making requests to the ministry in his name; it must stay off any public
+  deployment.
 
 ## 🔒 Security
 

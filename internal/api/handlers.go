@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -110,15 +111,33 @@ func parseIntPtr(s string) *int {
 	return &v
 }
 
+// parseFloatPtr reads an optional float query parameter.
+//
+// NaN and ±Inf parse cleanly with strconv and then poison everything
+// downstream: a distance computed from NaN is NaN, json.Marshal refuses to
+// encode it, and writeJSON has already sent a 200 — so the caller gets a
+// success code and an empty body. They are rejected here, where "absent" is
+// already a meaning the callers handle.
 func parseFloatPtr(s string) *float64 {
 	if s == "" {
 		return nil
 	}
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return nil
 	}
 	return &v
+}
+
+// parseCoordPtr is parseFloatPtr for a latitude or longitude, which also have
+// to be on the planet. A longitude of 4000 is not a location, and letting it
+// through means ranking real hospitals by their distance from nowhere.
+func parseCoordPtr(s string, limit float64) *float64 {
+	v := parseFloatPtr(s)
+	if v == nil || *v < -limit || *v > limit {
+		return nil
+	}
+	return v
 }
 
 // HandleSmartSearch handles the unified prioritized search.
@@ -135,8 +154,8 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lat := parseFloatPtr(r.URL.Query().Get("lat"))
-	lon := parseFloatPtr(r.URL.Query().Get("lon"))
+	lat := parseCoordPtr(r.URL.Query().Get("lat"), 90)
+	lon := parseCoordPtr(r.URL.Query().Get("lon"), 180)
 	maxDist, _ := strconv.ParseFloat(r.URL.Query().Get("maxDistanceInKm"), 64)
 	prefPtr := parseIntPtr(r.URL.Query().Get("prefectureId"))
 
@@ -560,7 +579,20 @@ func (s *Server) HandleDoctorSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDoctorNearby wraps /rv/searchdoctors/currentlocation (#19).
+//
+// Deprecated: the upstream geo endpoint has rejected every request with a 400
+// or a 500 regardless of payload for as long as this has been wired, so this
+// route has never returned a result. It stays because the wiring is correct and
+// costs nothing, and it announces itself as deprecated because advertising a
+// capability that has never worked wastes the time of whoever tries it. Use
+// /api/search with lat/lon, which filters by distance on our side.
 func (s *Server) HandleDoctorNearby(w http.ResponseWriter, r *http.Request) {
+	// RFC 9745 wants a structured date, not a bare "true" — a conforming client
+	// reading "true" learns nothing it can act on. The date is when this was
+	// marked, 2026-09-07.
+	w.Header().Set("Deprecation", "@1757203200")
+	w.Header().Set("Link", `</api/search>; rel="alternate"`)
+
 	dc := s.agg.DoctorClient()
 	if dc == nil {
 		writeJSONError(w, http.StatusNotImplemented, "feature_unavailable", "extended ministry client not wired")
@@ -571,8 +603,8 @@ func (s *Server) HandleDoctorNearby(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_param", "specialtyId required")
 		return
 	}
-	lat := parseFloatPtr(r.URL.Query().Get("lat"))
-	lon := parseFloatPtr(r.URL.Query().Get("lon"))
+	lat := parseCoordPtr(r.URL.Query().Get("lat"), 90)
+	lon := parseCoordPtr(r.URL.Query().Get("lon"), 180)
 	if lat == nil || lon == nil {
 		writeJSONError(w, http.StatusBadRequest, "missing_param", "lat and lon are required")
 		return
