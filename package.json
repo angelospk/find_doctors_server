@@ -1,0 +1,9 @@
+{
+  "name": "finddoctors-ministry-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TaxisNet session bridge that proxies Ministry API calls through a logged-in browser",
+  "scripts": { "bridge": "node --env-file-if-exists=.env scripts/ministry-bridge.mjs" },
+  "dependencies": { "playwright-core": "^1.49.0" }
+}
