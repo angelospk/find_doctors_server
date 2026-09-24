@@ -51,8 +51,15 @@ type autoLogin struct {
 	username string
 	password string
 	amka     string
-	lastAt   time.Time
+	lastOK   time.Time     // last SUCCESSFUL login — starts the cooldown
+	inflight chan struct{} // closed when the running login finishes
+	lastErr  error         // result of the last finished login, for waiters
+	// login performs the actual login; nil = c.LoginTaxisnet (tests inject a fake).
+	login func(ctx context.Context, username, password, amka string) error
 }
+
+// reloginTimeout bounds a detached re-login (the TaxisNet flow is several round trips).
+const reloginTimeout = 45 * time.Second
 
 // EnableAutoLogin stores TaxisNet credentials + ΑΜΚΑ so the client can (re)establish
 // its own session with no browser. Safe to call once at startup.
@@ -70,21 +77,53 @@ func (c *Client) AutoLoginEnabled() bool {
 	return c.auto != nil && c.auto.username != "" && c.auto.password != "" && c.auto.amka != ""
 }
 
-// ensureFreshSession runs a login if one hasn't run very recently (cooldown), so a
-// burst of 403s collapses into a single re-login. Returns the login error (if any).
+// ensureFreshSession re-establishes the session after a 403. A burst of 403s shares one
+// login; only a SUCCESSFUL login starts the 30s cooldown (a failed one is retried at
+// once). The login itself runs detached from the caller's context: the request that hit
+// the 403 is often cancelled (the page moved on), and cancelling the login with it used
+// to leave the session dead until a restart. The caller still stops waiting on cancel.
 func (c *Client) ensureFreshSession(ctx context.Context) error {
 	if !c.AutoLoginEnabled() {
 		return fmt.Errorf("auto-login not configured")
 	}
-	c.auto.mu.Lock()
-	if time.Since(c.auto.lastAt) < 30*time.Second {
-		c.auto.mu.Unlock()
+	a := c.auto
+	a.mu.Lock()
+	if !a.lastOK.IsZero() && time.Since(a.lastOK) < 30*time.Second {
+		a.mu.Unlock()
 		return nil
 	}
-	c.auto.lastAt = time.Now()
-	user, pass, amka := c.auto.username, c.auto.password, c.auto.amka
-	c.auto.mu.Unlock()
-	return c.LoginTaxisnet(ctx, user, pass, amka)
+	ch := a.inflight
+	if ch == nil {
+		ch = make(chan struct{})
+		a.inflight = ch
+		user, pass, amka := a.username, a.password, a.amka
+		login := a.login
+		if login == nil {
+			login = c.LoginTaxisnet
+		}
+		go func() {
+			lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reloginTimeout)
+			err := login(lctx, user, pass, amka)
+			cancel()
+			a.mu.Lock()
+			a.inflight, a.lastErr = nil, err
+			if err == nil {
+				a.lastOK = time.Now()
+			}
+			close(ch)
+			a.mu.Unlock()
+		}()
+	}
+	a.mu.Unlock()
+
+	select {
+	case <-ch:
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.lastErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // LoginTaxisnet performs the full browserless login + ΑΜΚΑ identification and, on
