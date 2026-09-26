@@ -11,6 +11,7 @@ import (
 func TestFilterSearchUnits(t *testing.T) {
 	zero := 0
 	one := 1
+	hunit := 718
 	raw := func(s string) json.RawMessage { return json.RawMessage(s) }
 	in := []ministry.HUnit{
 		{HUnitID: raw(`"081"`), IsActive: &one, ResponseCode: 0, Name: "  Good "},
@@ -20,10 +21,17 @@ func TestFilterSearchUnits(t *testing.T) {
 		{HUnitID: raw(`"081"`), IsActive: &zero, ResponseCode: 0, Name: "inactive"},
 		{HUnitID: raw(`"081"`), IsActive: &one, ResponseCode: 2, Name: "placeholder"},
 		{HUnitID: raw(`"99"`), IsActive: &one, ResponseCode: 0, Name: "Keep", Address: "  3 km road  "},
+		// Real hospitals (e.g. ΠΓΝ Αλεξανδρούπολης) come with hunitId:null but a
+		// numeric hunit, which is the id every downstream call uses.
+		{HUnitID: raw(`null`), HUnit: &hunit, IsActive: &one, ResponseCode: 0, Name: "null id, real hunit"},
+		{HUnitID: raw(`null`), HUnit: &zero, IsActive: &one, ResponseCode: 0, Name: "null id, zero hunit"},
 	}
 	out := FilterSearchUnits(in)
-	if len(out) != 2 {
-		t.Fatalf("expected 2 units kept, got %d (%+v)", len(out), out)
+	if len(out) != 3 {
+		t.Fatalf("expected 3 units kept, got %d (%+v)", len(out), out)
+	}
+	if out[2].Name != "null id, real hunit" {
+		t.Errorf("unit with a numeric hunit dropped: %+v", out)
 	}
 	if out[0].Name != "Good" {
 		t.Errorf("name not trimmed: %q", out[0].Name)
