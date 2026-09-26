@@ -54,6 +54,8 @@ type Aggregator struct {
 
 	// Default fallback when dynamic discovery is unavailable.
 	defaultForeasIDs []int
+
+	docDates doctorDateCache
 }
 
 // New creates a new Aggregator instance using a discard logger by default.
