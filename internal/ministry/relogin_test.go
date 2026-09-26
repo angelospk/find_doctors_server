@@ -3,6 +3,8 @@ package ministry
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -86,5 +88,55 @@ func TestConcurrentReloginsShareOneLogin(t *testing.T) {
 	wg.Wait()
 	if calls.Load() != 1 {
 		t.Fatalf("login calls = %d, want 1", calls.Load())
+	}
+}
+
+// The 17:02 incident: the upstream stopped answering our session (fresh sessions got
+// answers in 70 ms) and every call hung until its deadline. No 403 ever came, so no
+// re-login; only a restart helped. A run of timeouts now re-logs in by itself.
+func TestTimeoutsTriggerRelogin(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-hang }))
+	defer srv.Close()
+	defer close(hang)
+	var logins atomic.Int32
+	c := autoClient(func(context.Context) error { logins.Add(1); return nil })
+	c.BaseURL = srv.URL
+	c.HTTPClient = &http.Client{Timeout: 20 * time.Millisecond}
+	c.MaxRetries = 1
+	for i := 0; i < stallLimit-1; i++ {
+		_ = c.doJSON(context.Background(), http.MethodGet, srv.URL, nil, nil)
+	}
+	if logins.Load() != 0 {
+		t.Fatalf("re-logged in after %d timeouts, want only at %d", stallLimit-1, stallLimit)
+	}
+	_ = c.doJSON(context.Background(), http.MethodGet, srv.URL, nil, nil)
+	deadline := time.Now().Add(time.Second)
+	for logins.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if logins.Load() != 1 {
+		t.Fatalf("logins = %d after %d timeouts, want 1", logins.Load(), stallLimit)
+	}
+}
+
+// A caller that gives up is not a stalled upstream.
+func TestCallerCancelIsNotAStall(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-hang }))
+	defer srv.Close()
+	defer close(hang)
+	var logins atomic.Int32
+	c := autoClient(func(context.Context) error { logins.Add(1); return nil })
+	c.HTTPClient = &http.Client{}
+	c.MaxRetries = 1
+	for i := 0; i < stallLimit+2; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { time.Sleep(5 * time.Millisecond); cancel() }()
+		_ = c.doJSON(ctx, http.MethodGet, srv.URL, nil, nil)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if logins.Load() != 0 {
+		t.Fatalf("caller cancels triggered %d logins", logins.Load())
 	}
 }

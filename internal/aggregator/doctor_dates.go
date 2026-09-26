@@ -57,11 +57,11 @@ func (c *doctorDateCache) put(key string, date *string, now time.Time) {
 }
 
 // DoctorFirstDates asks /rv/firstavailableslot, scoped by i_amka, for each doctor's
-// first free date. Same probe the unit search runs per hospital; at most 10 at once,
+// first free date. Same probe the unit search runs per hospital; at most 5 at once,
 // and only successful answers are cached so a failure is retried next time.
 func (a *Aggregator) DoctorFirstDates(ctx context.Context, docs []ministry.Doctor, base ministry.SearchPayload) []DoctorWithDate {
 	out := make([]DoctorWithDate, len(docs))
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 	for i, d := range docs {
 		out[i].Doctor = d
