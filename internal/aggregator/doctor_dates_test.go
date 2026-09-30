@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -58,5 +59,35 @@ func TestDoctorFirstDates(t *testing.T) {
 	a.DoctorFirstDates(context.Background(), docs, base)
 	if n := calls.Load(); n != 4 {
 		t.Errorf("want only the failed probe retried (4 calls), got %d", n)
+	}
+}
+
+// The prefecture filter is part of the question, so it is part of the cache key.
+func TestDoctorFirstDatesCacheKeepsPrefectureApart(t *testing.T) {
+	var calls atomic.Int32
+	mock := &MockMinistryClient{
+		FirstAvailableSlotFunc: func(ctx context.Context, p ministry.SearchPayload) (string, error) {
+			calls.Add(1)
+			if p.PrefectureID == nil {
+				return "2026-10-01", nil
+			}
+			return "2026-10-0" + strconv.Itoa(1+*p.PrefectureID), nil
+		},
+	}
+	a := New(mock)
+	one, two := 1, 2
+	docs := []ministry.Doctor{{Amka: "A"}}
+	want := map[*int]string{nil: "2026-10-01", &one: "2026-10-02", &two: "2026-10-03"}
+	for round := 0; round < 2; round++ {
+		for pref, date := range want {
+			base := ministry.SearchPayload{SpecialityID: 13, ForeasID: 19, PrefectureID: pref, StartDate: "s", EndDate: "e"}
+			got := a.DoctorFirstDates(context.Background(), docs, base)
+			if got[0].FirstDate == nil || *got[0].FirstDate != date {
+				t.Errorf("round %d, pref %v: got %v, want %s", round, pref, got[0].FirstDate, date)
+			}
+		}
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("want 3 probes (one per scope, then cache), got %d", n)
 	}
 }
