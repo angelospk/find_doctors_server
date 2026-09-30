@@ -38,6 +38,31 @@ type Client struct {
 
 	// auto holds optional TaxisNet credentials for browserless (re)login. nil = off.
 	auto *autoLogin
+
+	// stalls counts consecutive calls the upstream never answered (see noteStall).
+	stalls atomic.Int32
+}
+
+// stallLimit: this many calls in a row that got no answer at all means the upstream has
+// stopped serving our session (a fresh one is answered at once), so log in again.
+const stallLimit = 3
+
+// noteStall records one unanswered call and re-logs in, in the background, when they
+// add up. A caller that cancelled is not a stall; any answer resets the count.
+func (c *Client) noteStall(ctx context.Context, err error) {
+	if ctx.Err() == context.Canceled || !isTimeout(err) {
+		return
+	}
+	if c.stalls.Add(1) < stallLimit || !c.AutoLoginEnabled() {
+		return
+	}
+	c.stalls.Store(0)
+	go func() { _ = c.ensureFreshSession(context.WithoutCancel(ctx)) }()
+}
+
+func isTimeout(err error) bool {
+	var ne interface{ Timeout() bool }
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
 }
 
 // NewClient creates a new Ministry API client.
@@ -236,6 +261,11 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		res, err := c.HTTPClient.Do(req)
 		c.release()
 		apiLatency.WithLabelValues(endpoint).Observe(time.Since(start).Seconds())
+		if err != nil {
+			c.noteStall(ctx, err)
+		} else {
+			c.stalls.Store(0)
+		}
 		if err != nil {
 			apiCallsTotal.WithLabelValues(endpoint, "network_error").Inc()
 			// Never retry caller cancellations or deadline overruns.
