@@ -55,6 +55,8 @@ type autoLogin struct {
 	inflight *loginFlight // the running login, nil when none
 	// login performs the actual login; nil = c.LoginTaxisnet (tests inject a fake).
 	login func(ctx context.Context, username, password, amka string) error
+	// joined, if set, is called once a caller holds its flight (tests use it as a barrier).
+	joined func()
 }
 
 // loginFlight is one login attempt. Its waiters read its own err, never a later
@@ -120,7 +122,11 @@ func (c *Client) ensureFreshSession(ctx context.Context) error {
 			a.mu.Unlock()
 		}()
 	}
+	joined := a.joined
 	a.mu.Unlock()
+	if joined != nil {
+		joined()
+	}
 
 	select {
 	case <-f.done:
