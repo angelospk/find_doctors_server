@@ -156,11 +156,15 @@ func TestWaiterGetsItsOwnFlightResult(t *testing.T) {
 			return nil
 		})
 		const waiters = 8
+		joined := make(chan struct{}, 64)
+		c.auto.joined = func() { joined <- struct{}{} }
 		errs := make(chan error, waiters)
 		for i := 0; i < waiters; i++ {
 			go func() { errs <- c.ensureFreshSession(context.Background()) }()
 		}
-		time.Sleep(2 * time.Millisecond) // let every waiter join flight A
+		for i := 0; i < waiters; i++ { // every waiter holds flight A before it can finish
+			<-joined
+		}
 		close(gate)
 		for b := 0; b < 20; b++ { // successful flights B, C, ... racing A's waiters
 			_ = c.ensureFreshSession(context.Background())
