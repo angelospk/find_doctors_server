@@ -51,11 +51,17 @@ type autoLogin struct {
 	username string
 	password string
 	amka     string
-	lastOK   time.Time     // last SUCCESSFUL login — starts the cooldown
-	inflight chan struct{} // closed when the running login finishes
-	lastErr  error         // result of the last finished login, for waiters
+	lastOK   time.Time    // last SUCCESSFUL login — starts the cooldown
+	inflight *loginFlight // the running login, nil when none
 	// login performs the actual login; nil = c.LoginTaxisnet (tests inject a fake).
 	login func(ctx context.Context, username, password, amka string) error
+}
+
+// loginFlight is one login attempt. Its waiters read its own err, never a later
+// attempt's: a failed flight must not report the success of the one that followed.
+type loginFlight struct {
+	done chan struct{} // closed when the login finishes; err is set before
+	err  error
 }
 
 // reloginTimeout bounds a detached re-login (the TaxisNet flow is several round trips).
@@ -92,10 +98,10 @@ func (c *Client) ensureFreshSession(ctx context.Context) error {
 		a.mu.Unlock()
 		return nil
 	}
-	ch := a.inflight
-	if ch == nil {
-		ch = make(chan struct{})
-		a.inflight = ch
+	f := a.inflight
+	if f == nil {
+		f = &loginFlight{done: make(chan struct{})}
+		a.inflight = f
 		user, pass, amka := a.username, a.password, a.amka
 		login := a.login
 		if login == nil {
@@ -106,21 +112,19 @@ func (c *Client) ensureFreshSession(ctx context.Context) error {
 			err := login(lctx, user, pass, amka)
 			cancel()
 			a.mu.Lock()
-			a.inflight, a.lastErr = nil, err
+			a.inflight, f.err = nil, err
 			if err == nil {
 				a.lastOK = time.Now()
 			}
-			close(ch)
+			close(f.done)
 			a.mu.Unlock()
 		}()
 	}
 	a.mu.Unlock()
 
 	select {
-	case <-ch:
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		return a.lastErr
+	case <-f.done:
+		return f.err
 	case <-ctx.Done():
 		return ctx.Err()
 	}

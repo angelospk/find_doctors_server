@@ -140,3 +140,38 @@ func TestCallerCancelIsNotAStall(t *testing.T) {
 		t.Fatalf("caller cancels triggered %d logins", logins.Load())
 	}
 }
+
+// A waiter must get the result of the login it joined, not of whatever login finished
+// last: failed flight A, then an instant successful B, must not turn A's waiters green.
+func TestWaiterGetsItsOwnFlightResult(t *testing.T) {
+	for iter := 0; iter < 200; iter++ {
+		gate := make(chan struct{})
+		var failNext atomic.Bool
+		failNext.Store(true)
+		c := autoClient(func(context.Context) error {
+			if failNext.Swap(false) {
+				<-gate
+				return errors.New("taxisnet down")
+			}
+			return nil
+		})
+		const waiters = 8
+		errs := make(chan error, waiters)
+		for i := 0; i < waiters; i++ {
+			go func() { errs <- c.ensureFreshSession(context.Background()) }()
+		}
+		time.Sleep(2 * time.Millisecond) // let every waiter join flight A
+		close(gate)
+		for b := 0; b < 20; b++ { // successful flights B, C, ... racing A's waiters
+			_ = c.ensureFreshSession(context.Background())
+			c.auto.mu.Lock()
+			c.auto.lastOK = time.Time{} // no cooldown, so the next call logs in again
+			c.auto.mu.Unlock()
+		}
+		for i := 0; i < waiters; i++ {
+			if err := <-errs; err == nil {
+				t.Fatalf("iter %d: a waiter of the failed login got nil", iter)
+			}
+		}
+	}
+}

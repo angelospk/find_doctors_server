@@ -68,7 +68,11 @@ func (a *Aggregator) DoctorFirstDates(ctx context.Context, docs []ministry.Docto
 		if d.Amka == "" {
 			continue
 		}
-		key := d.Amka + "|" + strconv.Itoa(base.SpecialityID) + "|" + strconv.Itoa(base.ForeasID) + "|" + day(base.StartDate) + "|" + day(base.EndDate)
+		pref := "-" // no prefecture filter is its own scope, not prefecture 0
+		if base.PrefectureID != nil {
+			pref = strconv.Itoa(*base.PrefectureID)
+		}
+		key := d.Amka + "|" + strconv.Itoa(base.SpecialityID) + "|" + strconv.Itoa(base.ForeasID) + "|" + pref + "|" + day(base.StartDate) + "|" + day(base.EndDate)
 		if date, ok := a.docDates.get(key, time.Now()); ok {
 			out[i].FirstDate, out[i].ScanOK = date, true
 			continue
