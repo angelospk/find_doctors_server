@@ -56,7 +56,7 @@ func main() {
 	// a JSESSIONID cookie; we accept it at runtime from a local browser bridge (or
 	// headless login) and persist it so it survives restarts.
 	sessionPath := envString("MINISTRY_SESSION_PATH", "./ministry-session.txt")
-	if data, err := os.ReadFile(sessionPath); err == nil {
+	if data, err := os.ReadFile(sessionPath); err == nil { //nolint:gosec // G304: path comes from the operator's own env, not from a request
 		if sid := strings.TrimSpace(string(data)); sid != "" {
 			client.SetSessionCookie(sid)
 			logger.Info("loaded ministry session from disk", "path", sessionPath)
@@ -133,7 +133,7 @@ func main() {
 	mux.HandleFunc("GET /api/prefectures/mental-health", server.HandleMentalHealthPrefectures)
 
 	mux.HandleFunc("GET /api/doctors/search", server.HandleDoctorSearch)
-	mux.HandleFunc("GET /api/doctors/nearby", server.HandleDoctorNearby)
+	mux.HandleFunc("GET /api/doctors/nearby", server.HandleDoctorNearby) //nolint:staticcheck // SA1019: registered on purpose until the route is removed
 	mux.HandleFunc("GET /api/family-doctors/search", server.HandleFamilyDoctorSearch)
 	mux.HandleFunc("GET /api/covid/search", server.HandleCovidSearch)
 	mux.HandleFunc("GET /api/mental-health/search", server.HandleMentalHealthSearch)

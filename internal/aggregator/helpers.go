@@ -110,7 +110,9 @@ func FilterSearchUnits(units []ministry.HUnit) []ministry.HUnit {
 		if IsPlaceholder(u.ResponseCode) {
 			continue
 		}
-		if !hasUsableHUnitID(u.HUnitID) {
+		// hunitId is often null on real hospitals; the numeric hunit is the id
+		// every downstream call uses, so either one identifies the unit.
+		if !hasUsableHUnitID(u.HUnitID) && (u.HUnit == nil || *u.HUnit <= 0) {
 			continue
 		}
 		u.Address = strings.TrimSpace(u.Address)

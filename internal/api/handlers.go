@@ -572,8 +572,19 @@ func (s *Server) HandleDoctorSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, offset := pagination(r)
 	page := paginate(docs, limit, offset)
+	var data any = page
+	// Opt-in: one firstavailableslot call per doctor, so only for the returned page.
+	if r.URL.Query().Get("withFirstDate") == "1" {
+		data = s.agg.DoctorFirstDates(r.Context(), page, ministry.SearchPayload{
+			StartDate:    payload.StartDate,
+			EndDate:      payload.EndDate,
+			SpecialityID: specID,
+			ForeasID:     foreasID,
+			PrefectureID: payload.PrefectureID,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data": page,
+		"data": data,
 		"meta": map[string]any{"total": len(docs), "limit": limit, "offset": offset},
 	})
 }
