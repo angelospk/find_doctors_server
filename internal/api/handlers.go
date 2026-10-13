@@ -30,11 +30,20 @@ type Server struct {
 	// Cancellation watchdog (#5). nil when the feature isn't wired.
 	watches     *watch.Store
 	watchSeeder watch.SlotChecker
+
+	// unitProbeLimit caps how many units one smart search asks the Ministry about.
+	unitProbeLimit int
 }
 
 // NewServer initializes a new Server instance.
 func NewServer(agg *aggregator.Aggregator) *Server {
-	return &Server{agg: agg, logger: slog.Default()}
+	return &Server{agg: agg, logger: slog.Default(), unitProbeLimit: 60}
+}
+
+// WithUnitProbeLimit sets how many units one smart search probes (0 = no cap).
+func (s *Server) WithUnitProbeLimit(n int) *Server {
+	s.unitProbeLimit = n
+	return s
 }
 
 // WithLogger attaches a slog logger and returns the server.
@@ -160,7 +169,7 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 	prefPtr := parseIntPtr(r.URL.Query().Get("prefectureId"))
 
 	payload := ministry.SearchPayload{
-		StartDate:    time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		StartDate:    time.Now().UTC().Truncate(15 * time.Minute).Format("2006-01-02T15:04:05.000Z"), // a repeatable window: the unit-date cache keys it exactly
 		EndDate:      time.Now().AddDate(0, 6, 0).UTC().Format("2006-01-02T15:04:05.000Z"),
 		SpecialityID: specialtyID,
 		PrefectureID: prefPtr,
@@ -194,17 +203,18 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := s.agg.SmartSearch(ctx, units, payload, aggregator.SmartSearchOptions{
+	results, stats := s.agg.SmartSearchStats(ctx, units, payload, aggregator.SmartSearchOptions{
 		Lat:         lat,
 		Lon:         lon,
 		MaxDistance: maxDist,
+		MaxProbes:   s.unitProbeLimit,
 	})
 
 	limit, offset := pagination(r)
 	page := paginate(results, limit, offset)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": page,
-		"meta": map[string]any{"total": len(results), "limit": limit, "offset": offset},
+		"meta": map[string]any{"total": len(results), "limit": limit, "offset": offset, "candidates": stats.Candidates, "probed": stats.Probed},
 	})
 }
 

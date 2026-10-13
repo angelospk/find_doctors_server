@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -39,25 +41,127 @@ type Client struct {
 	// auto holds optional TaxisNet credentials for browserless (re)login. nil = off.
 	auto *autoLogin
 
-	// stalls counts consecutive calls the upstream never answered (see noteStall).
+	// stalls counts consecutive calls the upstream never answered (see noteStall), on
+	// the connection generation gen. A recovery starts a new generation; failures of
+	// calls that started on an older one no longer count.
 	stalls atomic.Int32
+	gen    atomic.Uint64
+	recMu  sync.Mutex
+
+	// tr is the connection pool every call (and the TaxisNet login) goes through, with
+	// its generation; a stall replaces it. newTransport builds one (nil = defaultTransport;
+	// tests inject theirs).
+	tr           atomic.Pointer[connGen]
+	newTransport func() *http.Transport
+}
+
+// connGen is one connection pool and the generation it belongs to. A request carries
+// the one it was sent on, so its failure is counted against the right generation.
+type connGen struct {
+	t   *http.Transport
+	gen uint64
+}
+
+// defaultTransport is our own pool, never http.DefaultTransport: finddoctors.gov.gr
+// speaks HTTP/2, so every call shares one connection, and a connection that stops
+// answering must be found and dropped. The ping closes one that answers nothing at all.
+func defaultTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ForceAttemptHTTP2 = true
+	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: 15 * time.Second, PingTimeout: 5 * time.Second}
+	return t
+}
+
+func (c *Client) mkTransport() *http.Transport {
+	if c.newTransport != nil {
+		return c.newTransport()
+	}
+	return defaultTransport()
+}
+
+// conn is the current pool and its generation.
+func (c *Client) conn() *connGen {
+	if cg := c.tr.Load(); cg != nil {
+		return cg
+	}
+	c.tr.CompareAndSwap(nil, &connGen{t: c.mkTransport(), gen: c.gen.Load()})
+	return c.tr.Load()
+}
+
+func (c *Client) currentTransport() *http.Transport { return c.conn().t }
+
+// resetTransport moves every new call to a fresh pool, in a new generation. Calls still
+// on the old one end at their own timeout; its connections are closed once they have.
+func (c *Client) resetTransport() {
+	next := &connGen{t: c.mkTransport(), gen: c.gen.Add(1)}
+	if old := c.tr.Swap(next); old != nil {
+		old.t.CloseIdleConnections()
+		time.AfterFunc(45*time.Second, old.t.CloseIdleConnections)
+	}
+}
+
+type connKey struct{}
+
+func withConn(ctx context.Context, cg *connGen) context.Context {
+	return context.WithValue(ctx, connKey{}, cg)
+}
+
+// connOf is the pool a request was started on, else the current one.
+func connOf(r *http.Request, c *Client) *connGen {
+	if cg, ok := r.Context().Value(connKey{}).(*connGen); ok {
+		return cg
+	}
+	return c.conn()
+}
+
+// swapRT sends each request through the client's current transport.
+type swapRT struct{ c *Client }
+
+func (s swapRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	return connOf(r, s.c).t.RoundTrip(r)
 }
 
 // stallLimit: this many calls in a row that got no answer at all means the upstream has
-// stopped serving our session (a fresh one is answered at once), so log in again.
+// stopped serving us (a fresh connection is answered at once), so open a new connection
+// and log in again.
 const stallLimit = 3
 
-// noteStall records one unanswered call and re-logs in, in the background, when they
-// add up. A caller that cancelled is not a stall; any answer resets the count.
-func (c *Client) noteStall(ctx context.Context, err error) {
+// noteStall records one unanswered call that started on connection generation gen, and
+// recovers when they add up: once per generation, however many calls time out together.
+// A caller that cancelled is not a stall; any answer resets the count.
+func (c *Client) noteStall(ctx context.Context, err error, gen uint64) {
 	if ctx.Err() == context.Canceled || !isTimeout(err) {
 		return
 	}
-	if c.stalls.Add(1) < stallLimit || !c.AutoLoginEnabled() {
+	c.recMu.Lock()
+	if gen != c.gen.Load() || c.stalls.Add(1) < stallLimit {
+		c.recMu.Unlock()
 		return
 	}
 	c.stalls.Store(0)
-	go func() { _ = c.ensureFreshSession(context.WithoutCancel(ctx)) }()
+	c.resetTransport()
+	c.recMu.Unlock()
+	go c.reloginAfterStall() //nolint:gosec // G118: detached on purpose; a login cancelled with its request left the session dead (relogin_test.go)
+}
+
+// reloginAfterStall runs on the new connection: a re-login over the dead one hangs too
+// (the 2026-10-13 stall lasted until a restart). It ignores the post-login cooldown.
+func (c *Client) reloginAfterStall() {
+	if !c.AutoLoginEnabled() {
+		slog.Default().Warn("ministry stall: no answer to several calls in a row; new connection (auto-login off)")
+		return
+	}
+	slog.Default().Warn("ministry stall: no answer to several calls in a row; new connection and re-login")
+	_ = c.ensureSession(context.Background(), true)
+}
+
+// loginHTTPClient is the TaxisNet login's client: its own cookie jar, our transport.
+func (c *Client) loginHTTPClient(jar http.CookieJar) *http.Client {
+	var rt http.RoundTripper = swapRT{c}
+	if c.HTTPClient != nil && c.HTTPClient.Transport != nil {
+		rt = c.HTTPClient.Transport
+	}
+	return &http.Client{Timeout: 30 * time.Second, Jar: jar, Transport: rt}
 }
 
 func isTimeout(err error) bool {
@@ -68,14 +172,15 @@ func isTimeout(err error) bool {
 // NewClient creates a new Ministry API client.
 // baseURL is typically "https://www.finddoctors.gov.gr"
 func NewClient(baseURL string) *Client {
-	return &Client{
+	c := &Client{
 		BaseURL:    baseURL,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 		cache:      NewTTLCache(),
 		sf:         newSingleflight(),
 		MaxRetries: 2,
 		RetryWait:  200 * time.Millisecond,
 	}
+	c.HTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: swapRT{c}}
+	return c
 }
 
 // SetMaxConcurrency caps how many upstream requests may be in flight at once.
@@ -249,7 +354,8 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		if encoded != nil {
 			rdr = bytes.NewReader(encoded)
 		}
-		req, err := http.NewRequestWithContext(ctx, method, url, rdr)
+		cg := c.conn()
+		req, err := http.NewRequestWithContext(withConn(ctx, cg), method, url, rdr)
 		if err != nil {
 			return fmt.Errorf("new request: %w", err)
 		}
@@ -258,11 +364,12 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 		if err := c.acquire(ctx); err != nil {
 			return err
 		}
+		gen := cg.gen
 		res, err := c.HTTPClient.Do(req)
 		c.release()
 		apiLatency.WithLabelValues(endpoint).Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.noteStall(ctx, err)
+			c.noteStall(ctx, err, gen)
 		} else {
 			c.stalls.Store(0)
 		}
@@ -299,7 +406,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 			// and retry; the next attempt re-reads the refreshed session cookie.
 			if res.StatusCode == http.StatusForbidden && c.AutoLoginEnabled() {
 				if lerr := c.ensureFreshSession(ctx); lerr != nil {
-					return fmt.Errorf("auto re-login after 403 failed: %w", lerr)
+					return fmt.Errorf("auto re-login after 403 failed: %s", LoginErrorStage(lerr))
 				}
 				lastErr = fmt.Errorf("upstream returned 403; re-logged in")
 				continue

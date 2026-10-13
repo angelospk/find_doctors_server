@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -91,16 +92,36 @@ func (c *Client) AutoLoginEnabled() bool {
 // the 403 is often cancelled (the page moved on), and cancelling the login with it used
 // to leave the session dead until a restart. The caller still stops waiting on cancel.
 func (c *Client) ensureFreshSession(ctx context.Context) error {
+	return c.ensureSession(ctx, false)
+}
+
+// ensureSession is ensureFreshSession; force skips the cooldown (a stall needs a login
+// even right after one), but still joins a login already running.
+func (c *Client) ensureSession(ctx context.Context, force bool) error {
 	if !c.AutoLoginEnabled() {
 		return fmt.Errorf("auto-login not configured")
 	}
 	a := c.auto
 	a.mu.Lock()
-	if !a.lastOK.IsZero() && time.Since(a.lastOK) < 30*time.Second {
+	if !force && !a.lastOK.IsZero() && time.Since(a.lastOK) < 30*time.Second {
 		a.mu.Unlock()
 		return nil
 	}
 	f := a.inflight
+	if f != nil && force {
+		// The login already running may be on the retired connection: let it finish,
+		// and log in again unless it succeeded.
+		a.mu.Unlock()
+		select {
+		case <-f.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if f.err == nil {
+			return nil
+		}
+		return c.ensureSession(ctx, true)
+	}
 	if f == nil {
 		f = &loginFlight{done: make(chan struct{})}
 		a.inflight = f
@@ -111,8 +132,14 @@ func (c *Client) ensureFreshSession(ctx context.Context) error {
 		}
 		go func() {
 			lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reloginTimeout)
+			start := time.Now()
 			err := login(lctx, user, pass, amka)
 			cancel()
+			if err != nil {
+				slog.Default().Warn("taxisnet re-login failed", "stage", LoginErrorStage(err), "timeout", isTimeout(err), "ms", time.Since(start).Milliseconds())
+			} else {
+				slog.Default().Info("taxisnet re-login ok", "ms", time.Since(start).Milliseconds())
+			}
 			a.mu.Lock()
 			a.inflight, f.err = nil, err
 			if err == nil {
@@ -136,6 +163,16 @@ func (c *Client) ensureFreshSession(ctx context.Context) error {
 	}
 }
 
+// LoginErrorStage is a login error safe to log: the text before its first ": ". The rest
+// can hold a response body (checkamka echoes patient data) or an OAuth URL with its code.
+func LoginErrorStage(err error) string {
+	s := err.Error()
+	if i := strings.Index(s, ": "); i >= 0 {
+		s = s[:i]
+	}
+	return s
+}
+
 // LoginTaxisnet performs the full browserless login + ΑΜΚΑ identification and, on
 // success, stores the finddoctors session cookies on the client.
 func (c *Client) LoginTaxisnet(ctx context.Context, username, password, amka string) error {
@@ -143,7 +180,7 @@ func (c *Client) LoginTaxisnet(ctx context.Context, username, password, amka str
 	if err != nil {
 		return fmt.Errorf("cookiejar: %w", err)
 	}
-	hc := &http.Client{Timeout: 30 * time.Second, Jar: jar}
+	hc := c.loginHTTPClient(jar)
 
 	do := func(method, urlStr, contentType string, body io.Reader) (*http.Response, []byte, error) {
 		req, err := http.NewRequestWithContext(ctx, method, urlStr, body)

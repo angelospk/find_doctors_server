@@ -36,6 +36,10 @@ func main() {
 
 	logger.Info("initializing concurrent aggregator engine")
 	agg := aggregator.New(client).WithLogger(logger).WithDoctorClient(client)
+	if path := os.Getenv("UNIT_COORD_FIXES"); path != "" {
+		agg.WithCoordFixes(aggregator.CoordFixFile(path))
+		logger.Info("unit coordinate fixes", "path", path)
+	}
 
 	logger.Info("initializing cancellation watchdog")
 	watchStore, err := watch.NewStore(envString("WATCH_STATE_PATH", "./watchdog-state.json"))
@@ -50,7 +54,7 @@ func main() {
 	poller := watch.NewPoller(watchStore, client, notifiers, logger)
 	poller.Interval = envDuration("WATCH_POLL_INTERVAL", 5*time.Minute)
 
-	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client)
+	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client).WithUnitProbeLimit(envInt("UNIT_PROBE_LIMIT", 60))
 
 	// TaxisNet session bridge. finddoctors v2.0.3 gates every upstream call behind
 	// a JSESSIONID cookie; we accept it at runtime from a local browser bridge (or
@@ -72,7 +76,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			if err := client.LoginTaxisnet(ctx, u, p, a); err != nil {
-				logger.Warn("browserless TaxisNet login failed at startup (will retry on 403)", "error", err)
+				logger.Warn("browserless TaxisNet login failed at startup (will retry on 403)", "stage", ministry.LoginErrorStage(err))
 			} else {
 				logger.Info("browserless TaxisNet login OK (no browser)")
 			}

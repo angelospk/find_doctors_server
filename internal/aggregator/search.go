@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,7 +56,11 @@ type Aggregator struct {
 	// Default fallback when dynamic discovery is unavailable.
 	defaultForeasIDs []int
 
-	docDates doctorDateCache
+	docDates  doctorDateCache
+	unitDates doctorDateCache // first free date per unit and window
+
+	// coordFixes supplies hand-checked unit coordinates; nil when unset.
+	coordFixes func() map[int]CoordFix
 }
 
 // New creates a new Aggregator instance using a discard logger by default.
@@ -211,6 +216,10 @@ type ScannedUnit struct {
 	// It is a straight line, not a drive. Naming it distanceKm rather than
 	// travelKm is the whole of the promise.
 	DistanceKm *float64 `json:"distanceKm,omitempty"`
+	// CoordsFixed marks a unit whose Ministry pin was replaced by a hand-checked
+	// one; ApproxCoords says the replacement is a town centre, not the building.
+	CoordsFixed  bool `json:"coordsFixed,omitempty"`
+	ApproxCoords bool `json:"approxCoords,omitempty"`
 }
 
 // FastScanner concurrently checks the first available slot for a list of units.
@@ -237,11 +246,26 @@ func (a *Aggregator) FastScanner(ctx context.Context, units []ministry.HUnit, pa
 			p.HUnit = unit.HUnit
 			p.ForeasID = unit.ForeasID
 
+			pref := "-" // no prefecture filter is its own scope, not prefecture 0
+			if payload.PrefectureID != nil {
+				pref = strconv.Itoa(*payload.PrefectureID)
+			}
+			key := strconv.Itoa(*unit.HUnit) + "|" + strconv.Itoa(unit.ForeasID) + "|" + strconv.Itoa(payload.SpecialityID) + "|" + pref + "|" + payload.StartDate + "|" + payload.EndDate
+			if cached, ok := a.unitDates.get(key, time.Now()); ok {
+				mu.Lock()
+				results = append(results, ScannedUnit{HUnit: unit, FirstDate: cached, ScanOK: true})
+				mu.Unlock()
+				return
+			}
+
 			dateStr, err := a.client.FirstAvailableSlot(ctx, p)
 			scanOK := err == nil
 			var datePtr *string
 			if err == nil && len(dateStr) == 10 {
 				datePtr = &dateStr
+			}
+			if err == nil {
+				a.unitDates.put(key, datePtr, time.Now())
 			}
 
 			a.logger.Debug("first slot probe", "hunit", *unit.HUnit, "name", unit.Name, "date", datePtr)
@@ -264,58 +288,168 @@ type SmartSearchOptions struct {
 	Lat         *float64
 	Lon         *float64
 	MaxDistance float64 // in km
+	// MaxProbes caps how many units are asked for their first free date (0 = no cap).
+	// With a location the nearest units are kept, otherwise the first in input order.
+	MaxProbes int
+}
+
+// approxSlackKm widens the radius (to 1.05 × radius + slack, as doctor-finder's
+// APPROX_SLACK_KM does) for a unit placed at its town centre: it may be inside the radius.
+const approxSlackKm = 10
+
+func hunitOf(u ministry.HUnit) int {
+	if u.HUnit == nil {
+		return -1
+	}
+	return *u.HUnit
+}
+
+// SearchStats reports how many units survived the radius and how many were checked
+// (from the cache or the Ministry).
+type SearchStats struct {
+	Candidates int
+	Probed     int
 }
 
 // SmartSearch combines availability scanning with geographic filtering and multi-level sorting.
 func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, payload ministry.SearchPayload, opts SmartSearchOptions) []ScannedUnit {
-	scanned := a.FastScanner(ctx, units, payload)
+	res, _ := a.SmartSearchStats(ctx, units, payload, opts)
+	return res
+}
 
-	// Measured before filtering, so a result that survives carries the figure
-	// the filter used rather than one computed a second time somewhere else.
-	if opts.Lat != nil && opts.Lon != nil {
-		for i := range scanned {
-			if !hasCoords(scanned[i].Latitude, scanned[i].Longitude) {
+// SmartSearchStats is SmartSearch plus the candidate/probe counts. The radius and the
+// probe cap are applied before any upstream call, so a narrow search does not probe
+// every unit of the prefecture.
+func (a *Aggregator) SmartSearchStats(ctx context.Context, units []ministry.HUnit, payload ministry.SearchPayload, opts SmartSearchOptions) ([]ScannedUnit, SearchStats) {
+	work := make([]ministry.HUnit, len(units))
+	copy(work, units)
+
+	type extra struct {
+		dist         *float64
+		fixed, apprx bool
+	}
+	extras := map[int]*extra{}
+	ex := func(u ministry.HUnit) *extra {
+		if u.HUnit == nil {
+			return &extra{}
+		}
+		e := extras[*u.HUnit]
+		if e == nil {
+			e = &extra{}
+			extras[*u.HUnit] = e
+		}
+		return e
+	}
+
+	if a.coordFixes != nil {
+		fixes := a.coordFixes()
+		for i := range work {
+			if work[i].HUnit == nil {
 				continue
 			}
-			d := distance(*opts.Lat, *opts.Lon, scanned[i].Latitude, scanned[i].Longitude)
-			scanned[i].DistanceKm = &d
+			f, ok := fixes[*work[i].HUnit]
+			if !ok || math.Abs(work[i].Latitude-f.FromLat) >= 1e-6 || math.Abs(work[i].Longitude-f.FromLon) >= 1e-6 {
+				continue // no fix, or the Ministry changed the pin since: Ministry wins
+			}
+			work[i].Latitude, work[i].Longitude = f.Lat, f.Lon
+			e := ex(work[i])
+			e.fixed, e.apprx = true, f.Approx
 		}
 	}
 
-	var filtered []ScannedUnit
-	if opts.MaxDistance > 0 && opts.Lat != nil && opts.Lon != nil {
-		for _, u := range scanned {
-			// Units whose upstream record lacks usable coordinates have an
-			// unknown location, not a distant one — keep them rather than
-			// silently dropping valid results with a bogus 0/0 distance.
-			if u.DistanceKm == nil {
-				filtered = append(filtered, u)
+	hasOrigin := opts.Lat != nil && opts.Lon != nil
+	dists := make([]*float64, len(work))
+	if hasOrigin {
+		for i := range work {
+			if !hasCoords(work[i].Latitude, work[i].Longitude) {
 				continue
 			}
-			if *u.DistanceKm <= opts.MaxDistance {
-				filtered = append(filtered, u)
-			}
+			d := distance(*opts.Lat, *opts.Lon, work[i].Latitude, work[i].Longitude)
+			dists[i] = &d
 		}
-	} else {
-		filtered = scanned
 	}
 
-	sort.Slice(filtered, func(i, j int) bool {
-		if filtered[i].FirstDate == nil && filtered[j].FirstDate == nil {
+	// Radius first. Units whose upstream record lacks usable coordinates have an
+	// unknown location, not a distant one: keep them rather than dropping valid
+	// results over a bogus 0/0 distance.
+	if opts.MaxDistance > 0 && hasOrigin {
+		kept := work[:0:0]
+		keptD := dists[:0:0]
+		for i := range work {
+			limit := opts.MaxDistance
+			if e := extras[hunitOf(work[i])]; e != nil && e.apprx {
+				limit = limit*1.05 + approxSlackKm // a town centre, not the building
+			}
+			if dists[i] == nil || *dists[i] <= limit {
+				kept = append(kept, work[i])
+				keptD = append(keptD, dists[i])
+			}
+		}
+		work, dists = kept, keptD
+	}
+	stats := SearchStats{Candidates: len(work)}
+
+	if opts.MaxProbes > 0 && len(work) > opts.MaxProbes {
+		if hasOrigin {
+			idx := make([]int, len(work))
+			for i := range idx {
+				idx[i] = i
+			}
+			sort.SliceStable(idx, func(x, y int) bool {
+				dx, dy := dists[idx[x]], dists[idx[y]]
+				if dx == nil || dy == nil {
+					return dx != nil && dy == nil
+				}
+				return *dx < *dy
+			})
+			idx = idx[:opts.MaxProbes]
+			nw := make([]ministry.HUnit, len(idx))
+			nd := make([]*float64, len(idx))
+			for k, i := range idx {
+				nw[k], nd[k] = work[i], dists[i]
+			}
+			work, dists = nw, nd
+		} else {
+			work, dists = work[:opts.MaxProbes], dists[:opts.MaxProbes]
+		}
+	}
+	for _, u := range work {
+		if u.HUnit != nil { // the scanner skips a unit with no id
+			stats.Probed++
+		}
+	}
+
+	for i := range work {
+		if work[i].HUnit != nil {
+			ex(work[i]).dist = dists[i]
+		}
+	}
+
+	scanned := a.FastScanner(ctx, work, payload)
+	for i := range scanned {
+		if e := extras[*scanned[i].HUnit.HUnit]; e != nil {
+			scanned[i].DistanceKm = e.dist
+			scanned[i].CoordsFixed = e.fixed
+			scanned[i].ApproxCoords = e.apprx
+		}
+	}
+
+	sort.Slice(scanned, func(i, j int) bool {
+		if scanned[i].FirstDate == nil && scanned[j].FirstDate == nil {
 			return false
 		}
-		if filtered[i].FirstDate == nil {
+		if scanned[i].FirstDate == nil {
 			return false
 		}
-		if filtered[j].FirstDate == nil {
+		if scanned[j].FirstDate == nil {
 			return true
 		}
-		if *filtered[i].FirstDate != *filtered[j].FirstDate {
-			return *filtered[i].FirstDate < *filtered[j].FirstDate
+		if *scanned[i].FirstDate != *scanned[j].FirstDate {
+			return *scanned[i].FirstDate < *scanned[j].FirstDate
 		}
-		if opts.Lat != nil && opts.Lon != nil {
-			iHas := hasCoords(filtered[i].Latitude, filtered[i].Longitude)
-			jHas := hasCoords(filtered[j].Latitude, filtered[j].Longitude)
+		if hasOrigin {
+			iHas := hasCoords(scanned[i].Latitude, scanned[i].Longitude)
+			jHas := hasCoords(scanned[j].Latitude, scanned[j].Longitude)
 			// Units with an unknown location sort after those we can rank by distance.
 			if iHas != jHas {
 				return iHas
@@ -323,14 +457,14 @@ func (a *Aggregator) SmartSearch(ctx context.Context, units []ministry.HUnit, pa
 			if !iHas {
 				return false
 			}
-			distI := distance(*opts.Lat, *opts.Lon, filtered[i].Latitude, filtered[i].Longitude)
-			distJ := distance(*opts.Lat, *opts.Lon, filtered[j].Latitude, filtered[j].Longitude)
+			distI := distance(*opts.Lat, *opts.Lon, scanned[i].Latitude, scanned[i].Longitude)
+			distJ := distance(*opts.Lat, *opts.Lon, scanned[j].Latitude, scanned[j].Longitude)
 			return distI < distJ
 		}
 		return false
 	})
 
-	return filtered
+	return scanned, stats
 }
 
 // GranularSlot represents an available appointment time with metadata for the UI.
