@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API του finddoctors.gov.gr: ανεπίσημος οδηγός</title>
+<style>
+  :root {
+    --bg: #fbfbf9;
+    --fg: #1b1c1e;
+    --muted: #55585c;
+    --border: #dcdad4;
+    --code-bg: #f2f1ec;
+    --card: #ffffff;
+    --accent: #0a5c86;
+    --get: #166534;
+    --get-bg: #e6f4ea;
+    --post: #8a4b00;
+    --post-bg: #fdf0dc;
+    --warn-border: #c9a227;
+    --warn-bg: #fdf7e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15161a;
+      --fg: #e7e6e2;
+      --muted: #a8a9ac;
+      --border: #33363b;
+      --code-bg: #1e2126;
+      --card: #1a1c20;
+      --accent: #74bfe2;
+      --get: #8ee0a8;
+      --get-bg: #17311f;
+      --post: #f0c07a;
+      --post-bg: #33260f;
+      --warn-border: #8a7327;
+      --warn-bg: #241f10;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.68;
+    overflow-wrap: break-word;
+  }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  code, pre, kbd, samp {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  p code, li code, td code, dd code, dt code, h3 code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.08em 0.32em;
+    font-size: 0.86em;
+  }
+
+  .layout {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 2rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .side { display: none; }
+
+  header.masthead { margin-bottom: 1.5rem; }
+  h1 {
+    font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.05rem);
+    line-height: 1.25;
+    margin: 0 0 1.25rem;
+    letter-spacing: -0.01em;
+  }
+
+  .disclaimer {
+    border: 1px solid var(--warn-border);
+    background: var(--warn-bg);
+    border-radius: 6px;
+    padding: 1rem 1.15rem;
+    margin: 0 0 1.75rem;
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+  .disclaimer strong { display: block; margin-bottom: 0.35rem; }
+
+  .lead { margin: 0 0 1.25rem; }
+
+  .note {
+    border-left: 3px solid var(--border);
+    padding: 0.15rem 0 0.15rem 0.9rem;
+    color: var(--muted);
+    margin: 1rem 0;
+    font-size: 0.96rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    line-height: 1.3;
+    margin: 3rem 0 1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    scroll-margin-top: 1.5rem;
+  }
+  h3 {
+    font-size: 1.06rem;
+    line-height: 1.35;
+    margin: 2rem 0 0.75rem;
+    scroll-margin-top: 1.5rem;
+  }
+  h4 {
+    font-size: 1rem;
+    margin: 1.5rem 0 0.5rem;
+  }
+  main section { scroll-margin-top: 1.5rem; }
+  main p { margin: 0 0 1rem; }
+  main ul, main ol { margin: 0 0 1rem; padding-left: 1.35rem; }
+  main li { margin: 0.35rem 0; }
+  main li > ul, main li > ol { margin: 0.35rem 0 0.5rem; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.15rem 1.25rem 0.9rem;
+    margin: 1.25rem 0 1.75rem;
+  }
+  .card > h3 { margin-top: 0; }
+  .card > :last-child { margin-bottom: 0.35rem; }
+
+  .card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 0.18rem 0.45rem;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge.get { color: var(--get); background: var(--get-bg); }
+  .badge.post { color: var(--post); background: var(--post-bg); }
+
+  .url {
+    display: block;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    word-break: break-all;
+    margin: 0 0 0.9rem;
+  }
+
+  .url-note {
+    margin: -0.5rem 0 1rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  dl.fields { margin: 0 0 1rem; }
+  dl.fields dt {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin: 0.85rem 0 0.15rem;
+  }
+  dl.fields dt:first-child { margin-top: 0; }
+  dl.fields dd { margin: 0; }
+
+  .codewrap { position: relative; margin: 0.85rem 0 1.1rem; }
+  pre {
+    margin: 0;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+  .js .codewrap pre { padding-top: 2.3rem; }
+  .copy {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+  }
+  .copy:hover { color: var(--fg); border-color: var(--accent); }
+
+  .table-wrap { overflow-x: auto; margin: 1rem 0 1.25rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    color: var(--muted);
+    font-size: 0.85rem;
+    padding-bottom: 0.4rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); font-weight: 600; }
+  td code { white-space: nowrap; }
+
+  .steps { list-style: none; padding: 0; margin: 1rem 0 1.5rem; }
+  .steps > li { margin: 0 0 1.5rem; }
+  .steps .step-title { font-weight: 600; display: block; margin-bottom: 0.35rem; }
+
+  .toc-mobile {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    margin: 0 0 1.75rem;
+    background: var(--card);
+  }
+  .toc-mobile summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  nav.toc { font-size: 0.88rem; line-height: 1.45; }
+  nav.toc ul { list-style: none; margin: 0; padding: 0; }
+  nav.toc li { margin: 0; }
+  nav.toc a {
+    display: block;
+    padding: 0.26rem 0.5rem 0.26rem 0.6rem;
+    border-left: 2px solid transparent;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  nav.toc a:hover { color: var(--fg); }
+  nav.toc a.active {
+    color: var(--fg);
+    border-left-color: var(--accent);
+    background: var(--code-bg);
+  }
+  nav.toc ul.sub { padding-left: 0.65rem; font-size: 0.84rem; }
+  .toc-mobile nav.toc { margin-top: 0.6rem; }
+  .toc-mobile nav.toc ul.sub { display: block; }
+
+  footer.site {
+    margin-top: 3.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  footer.site p { margin: 0 0 0.4rem; }
+
+  @media (min-width: 900px) {
+    .layout {
+      grid-template-columns: 205px minmax(0, 760px);
+      justify-content: center;
+      gap: 0 3rem;
+      padding-top: 3rem;
+    }
+    .side { display: block; }
+    .side nav.toc {
+      position: sticky;
+      top: 1.75rem;
+      max-height: calc(100vh - 3.5rem);
+      overflow-y: auto;
+    }
+    .toc-mobile { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <nav class="toc" aria-label="Πίνακας περιεχομένων">
+      <ul>
+        <li><a href="#s1">1. Βασικές έννοιες και παράμετροι</a></li>
+        <li><a href="#s2">2. Endpoints ανακάλυψης (GET)</a>
+          <ul class="sub">
+            <li><a href="#s20">2.0 Τύποι μονάδας υγείας</a></li>
+            <li><a href="#s21">2.1 Ειδικότητες</a></li>
+            <li><a href="#s22">2.2 Νομοί</a></li>
+            <li><a href="#s222">2.2.2 Ειδοποίηση ΕΟΠΥΥ</a></li>
+            <li><a href="#s23">2.3 Ιατρεία ανά νοσοκομείο</a></li>
+          </ul>
+        </li>
+        <li><a href="#s3">3. Αναζήτηση και διαθεσιμότητα (POST)</a>
+          <ul class="sub">
+            <li><a href="#s31">3.1 Νοσοκομεία με την ειδικότητα</a></li>
+            <li><a href="#s311">3.1.1 Ιδιώτες γιατροί</a></li>
+            <li><a href="#s312">3.1.2 Οικογενειακοί γιατροί</a></li>
+            <li><a href="#s313">3.1.3 Διαγνωστικά μηχανήματα</a></li>
+            <li><a href="#s32">3.2 Πρώτη διαθέσιμη ημέρα</a></li>
+            <li><a href="#s33">3.3 Πλέγμα διαθεσιμότητας</a></li>
+            <li><a href="#s34">3.4 Ραντεβού μιας ημέρας</a></li>
+          </ul>
+        </li>
+        <li><a href="#s4">4. Η ροή μιας αναζήτησης</a></li>
+        <li><a href="#s4b">4b. Τύποι αναζήτησης και λίστα endpoints</a></li>
+        <li><a href="#aggregator">Δικός σας aggregator</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <div class="content">
+    <header class="masthead">
+      <h1>API του finddoctors.gov.gr: ανεπίσημος οδηγός</h1>
+      <div class="disclaimer" role="note">
+        Ανεπίσημη τεκμηρίωση. Δεν σχετίζεται με το Υπουργείο Υγείας ή την ΗΔΙΚΑ. Περιγράφει το API όπως το παρατηρήσαμε (τελευταίος έλεγχος: 2026-10-21) και μπορεί να αλλάξει χωρίς προειδοποίηση. Κάθε κλήση θέλει ενεργό TaxisNet session. Οι κλήσεις να γίνονται με ήπιο ρυθμό: σε μαζικές σαρώσεις, παύση τουλάχιστον 1,5 s ανάμεσα στα αιτήματα.
+      </div>
+      <p class="lead">Ο οδηγός τεκμηριώνει, με reverse engineering, το API που χρησιμοποιεί το Υπουργείο Υγείας για τα ηλεκτρονικά ραντεβού σε νοσοκομεία και μονάδες ΠΦΥ (Πρωτοβάθμιας Φροντίδας Υγείας).</p>
+      <p class="note"><strong>Πρόσβαση:</strong> Κάθε endpoint του Υπουργείου θέλει ενεργό TaxisNet session (cookie <code>JSESSIONID</code>). Χωρίς αυτό απαντά <code>403 {"error":"Not found"}</code> (επαληθεύτηκε στις 2026-10-20 από 3 διευθύνσεις IP). Ο server κάνει μόνος του login στο TaxisNet και ανανεώνει το session.</p>
+    </header>
+
+    <details class="toc-mobile" open>
+      <summary>Περιεχόμενα</summary>
+      <nav class="toc" aria-label="Πίνακας περιεχομένων (κινητό)">
+        <ul>
+          <li><a href="#s1">1. Βασικές έννοιες και παράμετροι</a></li>
+          <li><a href="#s2">2. Endpoints ανακάλυψης (GET)</a>
+            <ul class="sub">
+              <li><a href="#s20">2.0 Τύποι μονάδας υγείας</a></li>
+              <li><a href="#s21">2.1 Ειδικότητες</a></li>
+              <li><a href="#s22">2.2 Νομοί</a></li>
+              <li><a href="#s222">2.2.2 Ειδοποίηση ΕΟΠΥΥ</a></li>
+              <li><a href="#s23">2.3 Ιατρεία ανά νοσοκομείο</a></li>
+            </ul>
+          </li>
+          <li><a href="#s3">3. Αναζήτηση και διαθεσιμότητα (POST)</a>
+            <ul class="sub">
+              <li><a href="#s31">3.1 Νοσοκομεία με την ειδικότητα</a></li>
+              <li><a href="#s311">3.1.1 Ιδιώτες γιατροί</a></li>
+              <li><a href="#s312">3.1.2 Οικογενειακοί γιατροί</a></li>
+              <li><a href="#s313">3.1.3 Διαγνωστικά μηχανήματα</a></li>
+              <li><a href="#s32">3.2 Πρώτη διαθέσιμη ημέρα</a></li>
+              <li><a href="#s33">3.3 Πλέγμα διαθεσιμότητας</a></li>
+              <li><a href="#s34">3.4 Ραντεβού μιας ημέρας</a></li>
+            </ul>
+          </li>
+          <li><a href="#s4">4. Η ροή μιας αναζήτησης</a></li>
+          <li><a href="#s4b">4b. Τύποι αναζήτησης και λίστα endpoints</a></li>
+          <li><a href="#aggregator">Δικός σας aggregator</a></li>
+        </ul>
+      </nav>
+    </details>
+
+    <main>
+      <section id="s1">
+        <h2>1. Βασικές έννοιες και παράμετροι</h2>
+        <p>Το API κάνει διάκριση πεζών-κεφαλαίων και δεν ονομάζει τις παραμέτρους με συνέπεια (CamelCase ή όχι). Κάθε κλειδί πρέπει να γράφεται ακριβώς όπως το θέλει το συγκεκριμένο endpoint (π.χ. αλλού <code>specialityID</code> και αλλού <code>specialityId</code>).</p>
+        <ul>
+          <li><strong><code>prefectureID</code> / <code>prefectureId</code></strong>: Ο κωδικός του νομού (π.χ. 5 = Αττική, 11 = Έβρος). Σε κάποια endpoints το <code>null</code> δίνει πανελλαδική αναζήτηση.</li>
+          <li><strong><code>specialityID</code> / <code>specialtyId</code> / <code>spec</code></strong>: Ο εσωτερικός κωδικός της ειδικότητας (π.χ. 10 = Νευρολόγος, 12 = Ουρολόγος).</li>
+          <li><strong><code>hunit</code> / <code>hunitId</code></strong>: Το ID της μονάδας υγείας (νοσοκομείο ή κέντρο υγείας). Π.χ. 21 = Ευαγγελισμός, 718 = Π.Γ.Ν. Αλεξανδρούπολης.</li>
+          <li><strong><code>foreasID</code> / <code>foreas</code> / <code>hUnitType</code></strong>: Ο τύπος του φορέα. Η πλήρης λίστα (από <code>/gen/getHealthUnitTypes/</code>, επιβεβαιωμένη live):
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>hUnitType</th><th>name</th><th>isActive (May 2026)</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>1</code></td><td>Νοσοκομείο (ΕΣΥ)</td><td>1</td></tr>
+                  <tr><td><code>18</code></td><td>Δημόσιες Δομές (ΠΦΥ / Κέντρα Υγείας)</td><td>0 *</td></tr>
+                  <tr><td><code>19</code></td><td>Ιδιώτες συμβεβλημένοι με ΕΟΠΥΥ</td><td>0 *</td></tr>
+                  <tr><td><code>20</code></td><td>Ιδιώτες</td><td>0 *</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="note">* Το <code>isActive=0</code> σημαίνει ότι η επιλογή είναι προσωρινά κρυμμένη στο UI. Τα endpoints δουλεύουν κανονικά και επιστρέφουν δεδομένα. Ένα dropdown τύπων πρέπει να διαβάζει το <code>/gen/getHealthUnitTypes/</code> δυναμικά.</p>
+          </li>
+          <li><strong><code>cDoorId</code> / <code>cid</code></strong>: Το ID του ιατρείου («πόρτας», clinic door) μέσα στο νοσοκομείο.</li>
+          <li><strong><code>groupId</code></strong>: Η ημέρα χωρίζεται σε 6 τρίωρα groups: <code>1=06-09</code>, <code>2=09-12</code>, <code>3=12-15</code>, <code>4=15-18</code>, <code>5=18-21</code>, <code>6=21-24</code>.</li>
+          <li><strong><code>isOnlyFd</code></strong> (0/1): Με <code>1</code> η αναζήτηση περιορίζεται σε οικογενειακούς/προσωπικούς γιατρούς. Πάει μαζί με τα ξεχωριστά endpoints <code>/rv/searchhunitsfd</code> και <code>/rv/searchdoctorsfd</code>.</li>
+          <li><strong><code>isMachine</code></strong> (0/1): Με <code>1</code> η αναζήτηση γίνεται ανά διαγνωστικό μηχάνημα (αξονικός, μαγνητικός, αιματολογικές κ.λπ.). Χρησιμοποιείται με τα endpoints <code>/machines/*</code>.</li>
+          <li><strong><code>isCovid</code></strong> (0/1): Με <code>1</code> αναζητούνται εμβολιαστικά κέντρα COVID. Έχει δική του λίστα νομών (<code>/gen/getprefecturescovid</code>).</li>
+          <li><strong><code>isMentalHealth</code></strong> (0/1) + <strong><code>rvtypeId=15</code></strong>: Η αναζήτηση «Ψυχικής Υγείας». Έχει δική της λίστα νομών (<code>/gen/getprefecturesmentalhealth</code>).</li>
+          <li><strong><code>amka</code></strong> (string): Το ΑΜΚΑ του γιατρού. Το επιστρέφει το <code>/rv/searchdoctors</code> και χρειάζεται για τη διαθεσιμότητα συγκεκριμένου ιδιώτη γιατρού.</li>
+          <li><strong><code>day</code></strong> (0-6): Ημέρα της εβδομάδας (Κυριακή=0, Δευτέρα=1, … Σάββατο=6).</li>
+        </ul>
+      </section>
+
+      <section id="s2">
+        <h2>2. Endpoints ανακάλυψης (discovery), <code>GET</code></h2>
+        <p>Αυτά τα endpoints καλούνται με <code>GET</code>. Τα δεδομένα τους αλλάζουν σπάνια, οπότε συμφέρει να μένουν σε cache. Στέλνουν και αυτά το header <code>authorization: no-auth</code>, μαζί με το session cookie.</p>
+
+        <section id="s20" class="card">
+          <h3>2.0 Τύποι μονάδας υγείας (<code>getHealthUnitTypes</code>)</h3>
+          <div class="card-head"><span class="badge get">GET</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getHealthUnitTypes/</code>
+          <p class="url-note">Το τελικό <code>/</code> είναι υποχρεωτικό· χωρίς αυτό απαντά <code>404</code>.</p>
+          <dl class="fields">
+            <dt>Επιστρέφει</dt>
+            <dd>Τη λίστα των τύπων φορέα. Επιβεβαιωμένο live (May 2026):
+              <div class="codewrap"><pre><code>[
+  {"hUnitType":1,  "name":"Νοσοκομείο",                            "isActive":1},
+  {"hUnitType":18, "name":"Δημόσιες Δομές",                         "isActive":0},
+  {"hUnitType":19, "name":"Ιδιώτες συμβεβλημένοι με τον ΕΟΠΥΥ",     "isActive":0},
+  {"hUnitType":20, "name":"Ιδιώτες",                                "isActive":0}
+]</code></pre></div>
+            </dd>
+            <dt>Σχόλιο</dt>
+            <dd>Αυτή είναι η πηγή για τα <code>foreasID</code>. Πολλά είναι <code>isActive:0</code> στο UI, αλλά τα endpoints αναζήτησης δουλεύουν για όλα.</dd>
+          </dl>
+        </section>
+
+        <section id="s21" class="card">
+          <h3>2.1 Ειδικότητες</h3>
+          <div class="card-head"><span class="badge get">GET</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getspecialities</code>
+          <dl class="fields">
+            <dt>Επιστρέφει</dt>
+            <dd>Όλες τις ειδικότητες, για το dropdown του UI.
+              <div class="codewrap"><pre><code>[
+  {"speciality": 10, "name": "ΝΕΥΡΟΛΟΓΟΣ", "isActive": 1},
+  {"speciality": 12, "name": "ΟΥΡΟΛΟΓΟΣ", "isActive": 1}
+]</code></pre></div>
+            </dd>
+          </dl>
+        </section>
+
+        <section id="s22" class="card">
+          <h3>2.2 Νομοί</h3>
+          <div class="card-head"><span class="badge get">GET</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getprefectures</code>
+          <dl class="fields">
+            <dt>Επιστρέφει</dt>
+            <dd>Τους νομούς της Ελλάδας.</dd>
+          </dl>
+        </section>
+
+        <section id="s221">
+          <h3>2.2.1 Λίστες νομών ανά τύπο αναζήτησης</h3>
+          <p>Κάποιοι τύποι αναζήτησης έχουν δική τους, μικρότερη λίστα νομών (χωρίς τελικό <code>/</code> απαντούν <code>404</code>):</p>
+          <ul>
+            <li><strong><code>GET /api/v1/gen/getprefecturescovid</code></strong>: νομοί με εμβολιαστικά κέντρα COVID.</li>
+            <li><strong><code>GET /api/v1/gen/getprefecturesmentalhealth</code></strong>: νομοί με δομές Ψυχικής Υγείας.</li>
+            <li><strong><code>POST /api/v1/gen/getfilteredprefectures</code></strong> / <strong><code>getfilteredspecialities</code></strong>: φιλτράρουν δυναμικά. Με λάθος payload απαντούν 500· το σωστό payload δεν έχει βρεθεί ακόμα.</li>
+          </ul>
+        </section>
+
+        <section id="s222" class="card">
+          <h3>2.2.2 Ειδοποίηση ΕΟΠΥΥ (<code>getEOPYYShowMessage</code>)</h3>
+          <div class="card-head"><span class="badge get">GET</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/getEOPYYShowMessage</code>
+          <dl class="fields">
+            <dt>Επιστρέφει</dt>
+            <dd><code>0</code> ή <code>1</code>. Είναι feature flag: με <code>1</code> το UI δείχνει ένα banner στην αναζήτηση ΕΟΠΥΥ.</dd>
+          </dl>
+        </section>
+
+        <section id="s23" class="card">
+          <h3>2.3 Ιατρεία ανά νοσοκομείο (clinic doors)</h3>
+          <div class="card-head"><span class="badge get">GET</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/gen/cdoorsbyhunitspeciality</code>
+          <dl class="fields">
+            <dt>Url Params</dt>
+            <dd><code>hunitId=21&amp;specialtyId=12&amp;iscovid19=false</code></dd>
+            <dt>Σχόλιο</dt>
+            <dd>Χρησιμεύει όταν ο χρήστης πρέπει να διαλέξει συγκεκριμένο τακτικό εξωτερικό ιατρείο (π.χ. «Ουρολογικό Ανδρολογικό» ή «Ουρολογικό Συνταγογράφησης»). Εδώ τα ονόματα είναι <code>hunitId</code> και <code>specialtyId</code>. Με <code>specialityID</code> το Υπουργείο απαντά <code>400</code> (επαληθεύτηκε στις 2026-10-21).</dd>
+          </dl>
+        </section>
+      </section>
+
+      <section id="s3">
+        <h2>3. Endpoints αναζήτησης και διαθεσιμότητας, <code>POST</code></h2>
+        <p>Σε αυτά τα endpoints στέλνονται τα φίλτρα, και το Υπουργείο απαντά πού υπάρχει διαθεσιμότητα.</p>
+
+        <section id="s31" class="card">
+          <h3>3.1 Νοσοκομεία με την ειδικότητα (<code>searchhunits</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/searchhunits</code>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Επιστρέφει όλα τα νοσοκομεία ενός νομού (ή όλης της χώρας) που έχουν την ειδικότητα, με συντεταγμένες (<code>lattitude</code>, <code>longitude</code>).</dd>
+            <dt>Πανελλαδικά</dt>
+            <dd>Με <code>prefectureID: null</code> επιστρέφει νοσοκομεία από όλη την Ελλάδα.</dd>
+            <dt>Payload (<code>dataload</code>)</dt>
+            <dd>
+              <div class="codewrap"><pre><code>{
+  "startDate": "2026-03-21T00:00:00.000Z",
+  "endDate": "2026-07-18T23:59:59.000Z",
+  "prefectureID": 5, 
+  "specialityID": 12,
+  "foreasID": 1,
+  "regionalUnitID": null,
+  "cDoorId": null,
+  "isCovid": 0,
+  "isOnlyFd": 0,
+  "isMachine": 0
+}</code></pre></div>
+            </dd>
+          </dl>
+        </section>
+
+        <section id="s311" class="card">
+          <h3>3.1.1 Ιδιώτες γιατροί ονομαστικά (<code>searchdoctors</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/searchdoctors</code>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Επιστρέφει γιατρούς ονομαστικά (όχι μονάδες), με ΑΜΚΑ, διεύθυνση, lat/lon, ειδικότητα και, όπου υπάρχει, τηλέφωνο. Αυτό είναι το endpoint για τους «Ιδιώτες ΕΟΠΥΥ» (<code>foreasID=19</code>) και τους ιδιώτες (<code>foreasID=20</code>).</dd>
+            <dt>Παραλλαγή με τοποθεσία</dt>
+            <dd><code>POST /api/v1/rv/searchdoctors/currentlocation</code> (δέχεται <code>lattitude</code>, <code>longitude</code>, <code>distance</code>).</dd>
+            <dt>Payload (επιβεβαιωμένο)</dt>
+            <dd>
+              <div class="codewrap"><pre><code>{
+  "startDate": "2026-05-20T00:00:00.000Z",
+  "endDate":   "2026-08-20T23:59:59.000Z",
+  "prefectureID": 5,
+  "specialityID": 12,
+  "foreasID": 19,
+  "isCovid": 0,
+  "isOnlyFd": 0,
+  "isMachine": 0
+}</code></pre></div>
+            </dd>
+            <dt>Επιστρέφει (απόσπασμα)</dt>
+            <dd>
+              <div class="codewrap"><pre><code>[{
+  "firstName":"ΙΩΑΝΝΗΣ", "lastName":"ΠΑΠΑΔΟΠΟΥΛΟΣ",
+  "fathersName":"ΝΙΚΟΛΑΟΣ", "amka":"11111111111",
+  "specialtyName":"ΟΥΡΟΛΟΓΟΣ",
+  "address":"ΚΟΛΟΚΟΤΡΩΝΗ 2", "zip":"14232", "cityName":"ΝΕΑ ΙΩΝΙΑ",
+  "lattitude":38.03198, "longitude":23.745211,
+  "fullName":"ΠΑΠΑΔΟΠΟΥΛΟΣ ΙΩΑΝΝΗΣ, ΝΙΚΟΛΑΟΣ"
+}]</code></pre></div>
+            </dd>
+            <dt>Σημείωση</dt>
+            <dd>Όταν δεν υπάρχουν γιατροί, η απάντηση δεν είναι κενό array αλλά <strong>ένα</strong> object με <code>responseCode:2</code> και όλα τα πεδία <code>null</code>. Ο client πρέπει να το φιλτράρει.</dd>
+          </dl>
+        </section>
+
+        <section id="s312" class="card">
+          <h3>3.1.2 Οικογενειακοί γιατροί (<code>searchhunitsfd</code> / <code>searchdoctorsfd</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Η αναζήτηση «Προσωπικός/Οικογενειακός Γιατρός». Επιστρέφει τους εγγεγραμμένους γιατρούς ΠΦΥ. Τα payloads είναι ίδια με του <code>searchhunits</code> / <code>searchdoctors</code>, με <code>isOnlyFd:1</code>.</dd>
+            <dt>URLs</dt>
+            <dd>
+              <ul>
+                <li><code>POST /api/v1/rv/searchhunitsfd</code>: μονάδες οικογενειακών γιατρών.</li>
+                <li><code>POST /api/v1/rv/searchdoctorsfd</code>: οικογενειακοί γιατροί ονομαστικά.</li>
+              </ul>
+            </dd>
+            <dt>Παρατήρηση</dt>
+            <dd>Πανελλαδικά το live API επιστρέφει λίγα ή καθόλου αποτελέσματα. Μάλλον τα αποτελέσματα εξαρτώνται από τον ασθενή (μέσω ΑΜΚΑ). Χωρίς login η απάντηση είναι placeholder με <code>responseCode:2</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="s313" class="card">
+          <h3>3.1.3 Διαγνωστικά μηχανήματα (<code>machines/searchHunitsMachines</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span><span class="badge get">GET</span></div>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Η αναζήτηση «Διαγνωστικά / Εξετάσεις». Αντί για ειδικότητα δέχεται <code>rvTypeId</code> (τύπος εξέτασης).</dd>
+            <dt>URLs</dt>
+            <dd>
+              <ul>
+                <li><code>GET /api/v1/machines/getMachineRvTypes</code>: οι διαθέσιμοι τύποι εξετάσεων.</li>
+                <li><code>POST /api/v1/machines/searchHunitsMachines</code>: μονάδες με το συγκεκριμένο μηχάνημα.</li>
+              </ul>
+            </dd>
+            <dt>Απάντηση του <code>getMachineRvTypes</code> (επιβεβαιωμένη live)</dt>
+            <dd>
+              <div class="codewrap"><pre><code>[
+  {"rvTypeId":10,"name":"Αιματολογικές Εξετάσεις","isActive":1,"payType":1,"isMachine":1},
+  {"rvTypeId":16,"name":"Απεικονιστικές Εξετάσεις","isActive":1,"payType":1,"isMachine":1}
+]</code></pre></div>
+            </dd>
+            <dt><code>payType:1</code></dt>
+            <dd>σημαίνει ότι η εξέταση χρεώνεται (το UI δείχνει σχετική προειδοποίηση).</dd>
+          </dl>
+        </section>
+
+        <section id="s32" class="card">
+          <h3>3.2 Πρώτη διαθέσιμη ημέρα (<code>firstavailableslot</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/firstavailableslot</code>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Επιστρέφει μόνο ένα string, την ημερομηνία της πρώτης διαθέσιμης ημέρας, χωρίς όλο το ημερολόγιο του νοσοκομείου.</dd>
+            <dt>Χρήση</dt>
+            <dd>Με παράλληλες κλήσεις σε πολλά νοσοκομεία βρίσκεται ποιο έχει το πιο κοντινό ραντεβού, χωρίς να ζητηθεί το ημερολόγιο κανενός.</dd>
+            <dt>Payload</dt>
+            <dd>
+              <div class="codewrap"><pre><code>{
+  "startDate": "2026-03-21T00:00:00.000Z",
+  "endDate": "2026-07-18T23:59:59.000Z",
+  "prefectureID": 5,
+  "specialityID": 12,
+  "foreasID": 1,
+  "hunit": 21
+}</code></pre></div>
+            </dd>
+            <dt>Επιστρέφει</dt>
+            <dd>Ένα string, π.χ. <code>"2026-04-23"</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="s33" class="card">
+          <h3>3.3 Πλέγμα διαθεσιμότητας (<code>getslotsinit</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/getslotsinit</code>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Για ένα νοσοκομείο, επιστρέφει το ημερολόγιο σε τρίωρα groups (<code>groupId</code> 1 έως 6). Το <code>groupColor</code> κάθε group εξηγείται στην §3.4.</dd>
+            <dt>Το <code>hunit</code> στο payload</dt>
+            <dd>Για κάποιες ειδικότητες είναι υποχρεωτικό.</dd>
+            <dt>Payload</dt>
+            <dd>
+              <div class="codewrap"><pre><code>{
+  "startDate": "2026-03-26T00:00:00.000Z",
+  "endDate": "2026-03-31T23:59:59.000Z",
+  "prefectureID": 5,
+  "specialityID": 12,
+  "foreasID": 1,
+  "hunit": 21,
+  "regionalUnitID": null,
+  "cDoorId": null,
+  "isCovid": 0,
+  "isOnlyFd": 0,
+  "isMachine": 0
+}</code></pre></div>
+            </dd>
+          </dl>
+        </section>
+
+        <section id="s34" class="card">
+          <h3>3.4 Τα ραντεβού μιας ημέρας (<code>getactualslots</code>)</h3>
+          <div class="card-head"><span class="badge post">POST</span></div>
+          <code class="url">https://www.finddoctors.gov.gr/p-appointment/api/v1/rv/getactualslots</code>
+          <dl class="fields">
+            <dt>Τι κάνει</dt>
+            <dd>Αφού επιλεγεί η ημέρα (από το <code>getslotsinit</code>), επιστρέφει τα ακριβή δεκάλεπτα ραντεβού (π.χ. «12:20»), το ιατρείο (<code>cDoorName</code>), τα σχόλια και το όνομα του γιατρού, όταν το έχει καταχωρίσει η μονάδα.</dd>
+            <dt>Το <code>prefectureId</code> είναι υποχρεωτικό</dt>
+            <dd>στο payload (π.χ. <code>5</code>). Χωρίς αυτό η απάντηση είναι <code>[]</code>. Με <code>cDoorId: null</code> επιστρέφονται τα slots όλων των ιατρείων της ειδικότητας στο νοσοκομείο, χωρίς ερώτηση ανά ιατρείο.</dd>
+            <dt>Το πεδίο <code>day</code></dt>
+            <dd>δεν είναι ημερομηνία αλλά ημέρα της εβδομάδας (Κυριακή=0, Δευτέρα=1 … Σάββατο=6).</dd>
+            <dt>Η σημασία του <code>groupColor</code> (επαλήθευση 2026)</dt>
+            <dd>
+              <ul>
+                <li><code>warning</code> = αρκετά διαθέσιμα.</li>
+                <li><code>danger</code> = περιορισμένη διαθεσιμότητα.</li>
+                <li><code>disabled</code> = δεν υπάρχει διαθέσιμο slot σε αυτό το group. Αυτό δεν σημαίνει απαραίτητα ότι είναι γεμάτο. Συχνά ο γιατρός απλώς δεν δουλεύει εκείνη την ημέρα ή ώρα· πολλοί δουλεύουν μόνο Δευτέρα, Τετάρτη και Παρασκευή.</li>
+                <li><strong>Συνέπεια για τον υπολογισμό πληρότητας</strong>: Ο λόγος <code>disabled / total</code> δίνει ψεύτικα υψηλά νούμερα (π.χ. 95% «γεμάτο», ενώ ο γιατρός απλώς δουλεύει 2 ημέρες την εβδομάδα). Το <code>disabled</code> μετράει μόνο αν την ίδια ημέρα της εβδομάδας υπάρχει <code>warning</code>/<code>danger</code> κάποια άλλη εβδομάδα· εναλλακτικά χρειάζεται ξεχωριστή μέτρηση, π.χ. <code>weeklyAvailableDays</code>.</li>
+              </ul>
+            </dd>
+            <dt>Payload</dt>
+            <dd>
+              <div class="codewrap"><pre><code>{
+  "day": 4, 
+  "ddate": "2026-03-26T00:00:00.000Z",
+  "groupId": 3,
+  "hunit": 21,
+  "foreas": 1,
+  "specialityId": 12,
+  "prefectureId": 5,
+  "isOnlyFd": 0,
+  "isMachine": 0,
+  "cDoorId": null
+}</code></pre></div>
+            </dd>
+            <dt>Επιστρέφει (απόσπασμα)</dt>
+            <dd>
+              <div class="codewrap"><pre><code>[
+  {
+    "hUnitId": 21,
+    "rvDate": "2026-03-26T12:20:00.000+0200",
+    "rvtime": "12:20",
+    "doc_name": "ΓΕΝΙΚΟ ΝΟΣΟΚΟΜΕΙΟ ΑΘΗΝΩΝ O ΕΥΑΓΓΕΛΙΣΜΟΣ- ΠΟΛΥΚΛΙΝΙΚΗ:ΟΥΡΟΛΟΓΙΚΟ ΙΑΤΡΕΙΟ - ",
+    "address": "ΥΨΗΛΑΝΤΟΥ 45-47",
+    "city": "ΑΘΗΝΑ"
+  }
+]</code></pre></div>
+            </dd>
+          </dl>
+          <p class="note">(Στο παράδειγμα του Ευαγγελισμού το slot 12:20 υπάρχει, αλλά το όνομα του γιατρού καταλήγει σε <code> - </code>. Ο Ευαγγελισμός δηλαδή δεν καταχωρίζει γιατρό ανά ραντεβού στα ουρολογικά ιατρεία του group 3, μόνο το ιατρείο.)</p>
+        </section>
+      </section>
+
+      <section id="s4">
+        <h2>4. Η ροή μιας αναζήτησης</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-title">Βήμα 1: γρήγορη σάρωση</span>
+            <p>Για «Ουρολόγο στην Αθήνα», μία κλήση στο <code>searchhunits</code> φέρνει τα 10-20 νοσοκομεία. Ακολουθούν 20 παράλληλες κλήσεις στο <code>firstavailableslot</code>.</p>
+            <p><strong>Αποτέλεσμα</strong>: μια λίστα όπως <em>«Ευαγγελισμός σε 5 ημέρες, Λαϊκό σε 10, Γεννηματάς σε 20»</em>.</p>
+          </li>
+          <li>
+            <span class="step-title">Βήμα 2: οι ώρες της ημέρας</span>
+            <p>Ο χρήστης επιλέγει τον Ευαγγελισμό. Μία κλήση στο <code>getslotsinit</code> για την ημερομηνία που βρήκε το βήμα 1 (<code>2026-03-26</code>) δείχνει, π.χ., «υπάρχουν ραντεβού μεταξύ 12:00 και 15:00».</p>
+          </li>
+          <li>
+            <span class="step-title">Βήμα 3: τα ραντεβού</span>
+            <p>Μετά καλείται το <code>getactualslots</code>, με <code>prefectureId</code> και <code>cDoorId: null</code>. Η λίστα μοιάζει έτσι:</p>
+            <ul>
+              <li>12:20 | ΟΥΡΟΛΟΓΙΚΟ ΙΑΤΡΕΙΟ | ΓΙΑΤΡΟΣ: (αν υπάρχει)</li>
+              <li>12:40 | ΟΥΡΟΛΟΓΙΚΟ ΑΝΔΡΟΛΟΓΙΚΟ | ΓΙΑΤΡΟΣ: ΠΑΠΑΔΟΠΟΥΛΟΣ...</li>
+            </ul>
+          </li>
+          <li>
+            <span class="step-title">Βήμα 4: κράτηση</span>
+            <p>Η κράτηση γίνεται με το <code>bookappointment</code> (δεν αναλύεται εδώ). Θέλει login του χρήστη στην ΗΔΙΚΑ/TaxisNet, που δίνει τα cookies <code>FindDoc</code> και <code>cookiesession1</code>. Το login χρειάζεται μόνο τη στιγμή της κράτησης· η αναζήτηση (βήματα 1 έως 3) δεν το χρειάζεται από την πλευρά του χρήστη.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="s4b">
+        <h2>4b. Οι τύποι αναζήτησης του επίσημου UI (από reverse engineering του frontend, May 2026)</h2>
+        <p>Το επίσημο UI έχει τους εξής τύπους αναζήτησης:</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mode στο UI</th>
+                <th>foreasID / rvtypeId</th>
+                <th>Flags</th>
+                <th>Endpoints</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Δημόσια Νοσοκομεία (ΕΣΥ)</td>
+                <td><code>foreasID=1</code></td>
+                <td><code>isOnlyFd=0</code></td>
+                <td><code>/rv/searchhunits</code> + <code>/rv/firstavailableslot</code></td>
+              </tr>
+              <tr>
+                <td>Δημόσιες Δομές (ΠΦΥ)</td>
+                <td><code>foreasID=18</code></td>
+                <td><code>isOnlyFd=0</code></td>
+                <td><code>/rv/searchhunits</code> + <code>/rv/firstavailableslot</code></td>
+              </tr>
+              <tr>
+                <td>Ιδιώτες συμβεβλημένοι ΕΟΠΥΥ</td>
+                <td><code>foreasID=19</code></td>
+                <td><code>isOnlyFd=0</code></td>
+                <td><code>/rv/searchdoctors</code> + <code>/rv/searchdoctors/currentlocation</code></td>
+              </tr>
+              <tr>
+                <td>Ιδιώτες</td>
+                <td><code>foreasID=20</code></td>
+                <td><code>isOnlyFd=0</code></td>
+                <td><code>/rv/searchdoctors</code></td>
+              </tr>
+              <tr>
+                <td>Προσωπικός/Οικογενειακός Γιατρός</td>
+                <td><code>foreasID=18</code></td>
+                <td><code>isOnlyFd=1</code></td>
+                <td><code>/rv/searchhunitsfd</code> + <code>/rv/searchdoctorsfd</code></td>
+              </tr>
+              <tr>
+                <td>Ψυχικής Υγείας</td>
+                <td><code>rvtypeId=15</code></td>
+                <td><code>isMentalHealth=1</code></td>
+                <td><code>/rv/searchhunits</code> + ξεχωριστή λίστα νομών</td>
+              </tr>
+              <tr>
+                <td>Εμβολιασμοί COVID</td>
+                <td>—</td>
+                <td><code>isCovid=1</code></td>
+                <td><code>/rv/searchhunits</code> + <code>/gen/getprefecturescovid</code></td>
+              </tr>
+              <tr>
+                <td>Διαγνωστικά Μηχανήματα</td>
+                <td>—</td>
+                <td><code>isMachine=1</code>, <code>rvTypeId=10/16</code></td>
+                <td><code>/machines/getMachineRvTypes</code> + <code>/machines/searchHunitsMachines</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Ο server καλύπτει όλους αυτούς τους τύπους (βλ. <code>README.md</code>). Το <code>searchdoctors/currentlocation</code> δεν έχει δώσει ποτέ αποτέλεσμα.</p>
+
+        <section id="fulllist">
+          <h3>Πλήρης λίστα endpoints (από reverse engineering του Angular bundle <code>5-es2015.*.js</code>)</h3>
+
+          <h4>Discovery (GET, με τελικό <code>/</code> όπου σημειώνεται)</h4>
+          <ul>
+            <li><code>/api/v1/gen/getspecialities</code></li>
+            <li><code>/api/v1/gen/getprefectures</code></li>
+            <li><code>/api/v1/gen/getprefecturescovid</code></li>
+            <li><code>/api/v1/gen/getprefecturesmentalhealth</code></li>
+            <li><code>/api/v1/gen/getHealthUnitTypes/</code> (με τελικό <code>/</code>)</li>
+            <li><code>/api/v1/gen/cdoorsbyhunitspeciality</code></li>
+            <li><code>/api/v1/gen/getEOPYYShowMessage</code></li>
+            <li><code>/api/v1/gen/getcity</code>, <code>/getmunicipality</code>, <code>/getregionalunit</code> (πιθανώς POST· σε GET απαντούν 404)</li>
+            <li><code>/api/v1/gen/getfilteredspecialities</code> (POST, εξαρτάται από το payload)</li>
+            <li><code>/api/v1/gen/getfilteredprefectures</code> (POST, εξαρτάται από το payload)</li>
+            <li><code>/api/v1/gen/cancelation</code></li>
+            <li><code>/api/v1/gen/getparapompesbyamka</code>, <code>/updateparapompistatus</code> (παραπομπές· θέλουν ΑΜΚΑ και login)</li>
+          </ul>
+
+          <h4>Αναζήτηση και διαθεσιμότητα (POST)</h4>
+          <ul>
+            <li><code>/api/v1/rv/searchhunits</code></li>
+            <li><code>/api/v1/rv/searchhunitsfd</code></li>
+            <li><code>/api/v1/rv/searchdoctors</code></li>
+            <li><code>/api/v1/rv/searchdoctors/currentlocation</code></li>
+            <li><code>/api/v1/rv/searchdoctorsfd</code></li>
+            <li><code>/api/v1/rv/firstavailableslot</code></li>
+            <li><code>/api/v1/rv/getslotsinit</code></li>
+            <li><code>/api/v1/rv/getslots</code> (παραλλαγή· δεν έχει ερευνηθεί)</li>
+            <li><code>/api/v1/rv/getactualslots</code></li>
+            <li><code>/api/v1/rv/getDoctorDetails</code> (σε γρήγορο probe απάντησε 404· πιθανώς GET με query)</li>
+          </ul>
+
+          <h4>Κράτηση (POST, θέλουν cookie)</h4>
+          <ul>
+            <li><code>/api/v1/rv/bookrvwithhunit</code></li>
+            <li><code>/api/v1/rv/bookrvwithouthunit</code></li>
+            <li><code>/api/v1/rv/cancelrv</code></li>
+            <li><code>/api/v1/rv/getmyrvs</code></li>
+            <li><code>/api/v1/rv/getRvDetails</code></li>
+            <li><code>/api/v1/rv/rvpdf</code></li>
+          </ul>
+
+          <h4>Machines (POST/GET)</h4>
+          <ul>
+            <li><code>/api/v1/machines/getMachineRvTypes</code></li>
+            <li><code>/api/v1/machines/searchHunitsMachines</code></li>
+          </ul>
+
+          <h4>Διαχείριση ασθενή</h4>
+          <ul>
+            <li><code>/api/v1/patienterv/getPatientRvs</code>, <code>/savedetails</code>, <code>/generatepin</code>, <code>/verifypin</code>, <code>/generateCredentials</code>, <code>/cancelRv</code></li>
+          </ul>
+
+          <h4>Auth / Geo</h4>
+          <ul>
+            <li><code>/api/v1/auth/taxisnet</code>, <code>/auth/logout</code></li>
+            <li><code>/api/v1/geocoding/map</code> (μάλλον proxy για Mapbox)</li>
+          </ul>
+        </section>
+      </section>
+
+      <section id="aggregator">
+        <h2>Δικός σας aggregator</h2>
+        <p>Το repository περιέχει και έναν server σε Go που κάνει αυτές τις κλήσεις για λογαριασμό σας: αναζήτηση σε ΕΣΥ και ΠΦΥ μαζί, ταξινόμηση με το πιο κοντινό ραντεβού, ειδοποιήσεις για νωρίτερη ημερομηνία. Δεν υπάρχει δημόσια εγκατάσταση. Ο καθένας τον τρέχει μόνος του, με δικό του TaxisNet λογαριασμό. Οδηγίες και endpoints στο <a href="https://github.com/angelospk/find_doctors_server#readme">README</a>.</p>
+      </section>
+    </main>
+
+    <footer class="site">
+      <p><a href="https://github.com/angelospk/find_doctors_server">github.com/angelospk/find_doctors_server</a></p>
+      <p>Τελευταίος έλεγχος: 2026-10-21</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+(function () {
+  document.documentElement.classList.add('js');
+
+  // Κουμπιά αντιγραφής για κάθε block κώδικα.
+  var wraps = document.querySelectorAll('.codewrap');
+  for (var i = 0; i < wraps.length; i++) {
+    (function (wrap) {
+      var pre = wrap.querySelector('pre');
+      if (!pre) { return; }
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy';
+      btn.textContent = 'αντιγραφή';
+      btn.setAttribute('aria-label', 'Αντιγραφή κώδικα');
+      btn.addEventListener('click', function () {
+        var text = pre.textContent;
+        var ok = function () {
+          btn.textContent = 'αντιγράφηκε';
+          setTimeout(function () { btn.textContent = 'αντιγραφή'; }, 1600);
+        };
+        var fail = function () {
+          btn.textContent = 'επιλέξτε το κείμενο και αντιγράψτε το';
+          setTimeout(function () { btn.textContent = 'αντιγραφή'; }, 3000);
+        };
+        var fallback = function () {
+          var area = document.createElement('textarea');
+          area.value = text;
+          area.style.position = 'fixed';
+          area.style.top = '-1000px';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          var done = false;
+          try { done = document.execCommand('copy'); } catch (e) {}
+          if (done) { ok(); } else { fail(); }
+          document.body.removeChild(area);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(ok, fallback);
+        } else {
+          fallback();
+        }
+      });
+      wrap.appendChild(btn);
+    })(wraps[i]);
+  }
+
+  // Επισήμανση της τρέχουσας ενότητας στον πίνακα περιεχομένων.
+  var links = document.querySelectorAll('nav.toc a[href^="#"]');
+  var targets = [];
+  for (var j = 0; j < links.length; j++) {
+    var id = links[j].getAttribute('href').slice(1);
+    if (id && document.getElementById(id) && targets.indexOf(id) === -1) {
+      targets.push(id);
+    }
+  }
+
+  function setActive(id) {
+    for (var k = 0; k < links.length; k++) {
+      var on = links[k].getAttribute('href') === '#' + id;
+      if (on) {
+        links[k].classList.add('active');
+      } else {
+        links[k].classList.remove('active');
+      }
+    }
+  }
+
+  if ('IntersectionObserver' in window) {
+    var ratios = {};
+    var observer = new IntersectionObserver(function (entries) {
+      for (var n = 0; n < entries.length; n++) {
+        ratios[entries[n].target.id] = entries[n].isIntersecting ? entries[n].intersectionRatio : 0;
+      }
+      var best = null;
+      var bestRatio = 0;
+      for (var m = 0; m < targets.length; m++) {
+        var value = ratios[targets[m]] || 0;
+        if (value > bestRatio) {
+          bestRatio = value;
+          best = targets[m];
+        }
+      }
+      if (best) { setActive(best); }
+    }, { rootMargin: '-8% 0px -65% 0px', threshold: [0, 0.05, 0.2, 0.5, 1] });
+
+    for (var p = 0; p < targets.length; p++) {
+      var el = document.getElementById(targets[p]);
+      if (el) { observer.observe(el); }
+    }
+  }
+})();
+</script>
+</body>
+</html>
