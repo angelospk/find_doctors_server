@@ -659,7 +659,7 @@ func (c *Client) SearchHunitsFD(ctx context.Context, payload SearchPayload) ([]H
 
 // GetClinicDoors fetches the clinic-door breakdown for a given (hunit, specialty).
 func (c *Client) GetClinicDoors(ctx context.Context, hunitID, specialtyID int) ([]ClinicDoor, error) {
-	url := fmt.Sprintf("%s/p-appointment/api/v1/gen/cdoorsbyhunitspeciality?hunitId=%d&specialityID=%d", c.BaseURL, hunitID, specialtyID)
+	url := fmt.Sprintf("%s/p-appointment/api/v1/gen/cdoorsbyhunitspeciality?hunitId=%d&specialtyId=%d&iscovid19=false", c.BaseURL, hunitID, specialtyID)
 	var doors []ClinicDoor
 	if err := c.doJSON(ctx, http.MethodGet, url, nil, &doors); err != nil {
 		return nil, err
