@@ -31,13 +31,21 @@ type Server struct {
 	watches     *watch.Store
 	watchSeeder watch.SlotChecker
 
-	// unitProbeLimit caps how many units one smart search asks the Ministry about.
+	// unitProbeLimit caps how many units one smart search asks the Ministry about;
+	// unitProbeMax bounds what a caller may ask for (maxProbes), maxProbes=0 included.
 	unitProbeLimit int
+	unitProbeMax   int
 }
 
 // NewServer initializes a new Server instance.
 func NewServer(agg *aggregator.Aggregator) *Server {
-	return &Server{agg: agg, logger: slog.Default(), unitProbeLimit: 60}
+	return &Server{agg: agg, logger: slog.Default(), unitProbeLimit: 60, unitProbeMax: 1000}
+}
+
+// WithUnitProbeMax sets the hard ceiling on probes per search (0 = none).
+func (s *Server) WithUnitProbeMax(n int) *Server {
+	s.unitProbeMax = n
+	return s
 }
 
 // WithUnitProbeLimit sets how many units one smart search probes (0 = no cap).
@@ -195,8 +203,24 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		payload.EndDate = to.AddDate(0, 0, 1).UTC().Format("2006-01-02T15:04:05.000Z")
 	}
 
+	// maxProbes caps how many units this search asks the Ministry about; 0 asks for
+	// every unit (the nationwide directory scan). Without it the server default holds.
+	// Either way the ceiling unitProbeMax applies, and meta.truncated reports a cut.
+	maxProbes := s.unitProbeLimit
+	if v := r.URL.Query().Get("maxProbes"); v != "" {
+		n, perr := strconv.Atoi(v)
+		if perr != nil || n < 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid_param", "maxProbes must be a non-negative integer")
+			return
+		}
+		maxProbes = n
+	}
+	if s.unitProbeMax > 0 && (maxProbes == 0 || maxProbes > s.unitProbeMax) {
+		maxProbes = s.unitProbeMax
+	}
+
 	ctx := r.Context()
-	units, err := s.agg.SearchUnified(ctx, payload)
+	units, failedSectors, err := s.agg.SearchUnifiedFailures(ctx, payload)
 	if err != nil {
 		s.logger.Warn("smart search upstream failed", "error", err)
 		writeJSONError(w, http.StatusBadGateway, "upstream_failure", "ministry API call failed")
@@ -207,14 +231,14 @@ func (s *Server) HandleSmartSearch(w http.ResponseWriter, r *http.Request) {
 		Lat:         lat,
 		Lon:         lon,
 		MaxDistance: maxDist,
-		MaxProbes:   s.unitProbeLimit,
+		MaxProbes:   maxProbes,
 	})
 
 	limit, offset := pagination(r)
 	page := paginate(results, limit, offset)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": page,
-		"meta": map[string]any{"total": len(results), "limit": limit, "offset": offset, "candidates": stats.Candidates, "probed": stats.Probed},
+		"meta": map[string]any{"total": len(results), "limit": limit, "offset": offset, "candidates": stats.Candidates, "probed": stats.Probed, "truncated": stats.Truncated, "failedSectors": failedSectors},
 	})
 }
 

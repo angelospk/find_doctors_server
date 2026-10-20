@@ -303,3 +303,52 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// A cap that drops units says so; a cap that drops nothing, or no cap, does not.
+func TestProbeCapReportsTruncation(t *testing.T) {
+	var units []ministry.HUnit
+	for i := 1; i <= 10; i++ {
+		units = append(units, unit(i, 0, 0))
+	}
+	for _, tc := range []struct {
+		max  int
+		want bool
+	}{{4, true}, {10, false}, {20, false}, {0, false}} {
+		log := &probeLog{}
+		_, stats := New(log.client()).SmartSearchStats(context.Background(), units, ministry.SearchPayload{}, SmartSearchOptions{MaxProbes: tc.max})
+		if stats.Truncated != tc.want {
+			t.Fatalf("MaxProbes %d: truncated %v, want %v (%+v)", tc.max, stats.Truncated, tc.want, stats)
+		}
+	}
+}
+
+// Equal first dates (and no location) end in unit-id order, whatever order the probes
+// finish in: a result paged over several requests lists each unit once.
+func TestEqualDatesSortByUnitID(t *testing.T) {
+	var units []ministry.HUnit
+	for i := 300; i >= 1; i-- {
+		units = append(units, unit(i, 0, 0))
+	}
+	log := &probeLog{}
+	res, _ := New(log.client()).SmartSearchStats(context.Background(), units, ministry.SearchPayload{SpecialityID: 1}, SmartSearchOptions{})
+	for i := range res {
+		if *res[i].HUnit.HUnit != i+1 {
+			t.Fatalf("position %d holds unit %d, want %d", i, *res[i].HUnit.HUnit, i+1)
+		}
+	}
+}
+
+// A sector whose search failed is counted, so a caller can tell a short list from a
+// complete one.
+func TestSearchUnifiedCountsFailedSectors(t *testing.T) {
+	c := &MockMinistryClient{SearchHUnitsFunc: func(_ context.Context, p ministry.SearchPayload) ([]ministry.HUnit, error) {
+		if p.ForeasID == 18 {
+			return nil, errors.New("upstream 502")
+		}
+		return []ministry.HUnit{unit(1, 0, 0)}, nil
+	}}
+	units, failed, err := New(c).SearchUnifiedFailures(context.Background(), ministry.SearchPayload{SpecialityID: 1})
+	if err != nil || failed != 1 || len(units) != 1 {
+		t.Fatalf("units %d failed %d err %v, want 1, 1, nil", len(units), failed, err)
+	}
+}

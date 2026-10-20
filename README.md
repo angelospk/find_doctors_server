@@ -89,6 +89,15 @@ Queries Public Hospitals and Primary Care in parallel, then ranks by soonest slo
 within the distance filter. Params: `specialtyId` (**required**), `lat`/`lon`,
 `maxDistanceInKm`, `prefectureId` (all optional). Supports pagination.
 
+`maxProbes` caps how many units one search asks the Ministry about (nearest first
+when `lat`/`lon` are given). Without it the server default holds (`UNIT_PROBE_LIMIT`,
+60); `maxProbes=0` asks for every unit, as a nationwide directory scan must. A ceiling
+(`UNIT_PROBE_MAX`, 1000) bounds every search, `maxProbes=0` included.
+`meta.candidates` counts the units within the radius, `meta.probed` those checked,
+and `meta.truncated: true` says the cap left some out, so the result is not every
+unit that offers the specialty. `meta.failedSectors` counts the sectors (ΕΣΥ, ΠΦΥ)
+whose Ministry search failed: the rest still answer, but the list is short.
+
 `distanceKm` is present only when `lat`/`lon` were given **and** the unit's
 upstream record has usable coordinates. It is a great-circle distance, not a
 driving distance. `scanOk: false` means the availability check for that unit

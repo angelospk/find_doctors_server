@@ -115,9 +115,16 @@ func (a *Aggregator) Ready(ctx context.Context) error {
 // Units flagged inactive by the Ministry (IsActive == 0) are dropped so the
 // frontend never has to decide whether to show them.
 func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, error) {
+	units, _, err := a.SearchUnifiedFailures(ctx, payload)
+	return units, err
+}
+
+// SearchUnifiedFailures is SearchUnified plus the number of sectors whose search failed.
+// The app can live with one sector missing; a directory scan cannot.
+func (a *Aggregator) SearchUnifiedFailures(ctx context.Context, payload ministry.SearchPayload) ([]ministry.HUnit, int, error) {
 	foreasIDs := a.activeForeasIDs(ctx, []int{1, 18})
 	if len(foreasIDs) == 0 {
-		return []ministry.HUnit{}, nil
+		return []ministry.HUnit{}, 0, nil
 	}
 
 	var wg sync.WaitGroup
@@ -151,9 +158,9 @@ func (a *Aggregator) SearchUnified(ctx context.Context, payload ministry.SearchP
 	a.logger.Debug("unified search merge", "total", len(allUnits))
 
 	if len(errs) == len(foreasIDs) {
-		return nil, errs[0]
+		return nil, len(errs), errs[0]
 	}
-	return allUnits, nil
+	return allUnits, len(errs), nil
 }
 
 // activeForeasIDs returns the foreas list to use for unit-flavored searches.
@@ -309,6 +316,9 @@ func hunitOf(u ministry.HUnit) int {
 type SearchStats struct {
 	Candidates int
 	Probed     int
+	// Truncated is true when MaxProbes left some candidates unprobed: the result is
+	// not every unit that offers the specialty.
+	Truncated bool
 }
 
 // SmartSearch combines availability scanning with geographic filtering and multi-level sorting.
@@ -390,6 +400,7 @@ func (a *Aggregator) SmartSearchStats(ctx context.Context, units []ministry.HUni
 	stats := SearchStats{Candidates: len(work)}
 
 	if opts.MaxProbes > 0 && len(work) > opts.MaxProbes {
+		stats.Truncated = true
 		if hasOrigin {
 			idx := make([]int, len(work))
 			for i := range idx {
@@ -434,18 +445,15 @@ func (a *Aggregator) SmartSearchStats(ctx context.Context, units []ministry.HUni
 		}
 	}
 
+	// Soonest first, then nearest; ties end on the unit id. The probes finish in any order,
+	// and a result paged over several requests must list each unit exactly once.
 	sort.Slice(scanned, func(i, j int) bool {
-		if scanned[i].FirstDate == nil && scanned[j].FirstDate == nil {
-			return false
+		di, dj := scanned[i].FirstDate, scanned[j].FirstDate
+		if (di == nil) != (dj == nil) {
+			return di != nil
 		}
-		if scanned[i].FirstDate == nil {
-			return false
-		}
-		if scanned[j].FirstDate == nil {
-			return true
-		}
-		if *scanned[i].FirstDate != *scanned[j].FirstDate {
-			return *scanned[i].FirstDate < *scanned[j].FirstDate
+		if di != nil && *di != *dj {
+			return *di < *dj
 		}
 		if hasOrigin {
 			iHas := hasCoords(scanned[i].Latitude, scanned[i].Longitude)
@@ -454,14 +462,18 @@ func (a *Aggregator) SmartSearchStats(ctx context.Context, units []ministry.HUni
 			if iHas != jHas {
 				return iHas
 			}
-			if !iHas {
-				return false
+			if iHas {
+				distI := distance(*opts.Lat, *opts.Lon, scanned[i].Latitude, scanned[i].Longitude)
+				distJ := distance(*opts.Lat, *opts.Lon, scanned[j].Latitude, scanned[j].Longitude)
+				if distI != distJ {
+					return distI < distJ
+				}
 			}
-			distI := distance(*opts.Lat, *opts.Lon, scanned[i].Latitude, scanned[i].Longitude)
-			distJ := distance(*opts.Lat, *opts.Lon, scanned[j].Latitude, scanned[j].Longitude)
-			return distI < distJ
 		}
-		return false
+		if hi, hj := hunitOf(scanned[i].HUnit), hunitOf(scanned[j].HUnit); hi != hj {
+			return hi < hj
+		}
+		return scanned[i].ForeasID < scanned[j].ForeasID
 	})
 
 	return scanned, stats

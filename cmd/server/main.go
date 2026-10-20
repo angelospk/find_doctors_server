@@ -54,7 +54,7 @@ func main() {
 	poller := watch.NewPoller(watchStore, client, notifiers, logger)
 	poller.Interval = envDuration("WATCH_POLL_INTERVAL", 5*time.Minute)
 
-	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client).WithUnitProbeLimit(envInt("UNIT_PROBE_LIMIT", 60))
+	server := api.NewServer(agg).WithLogger(logger).WithWatches(watchStore, client).WithUnitProbeLimit(envInt("UNIT_PROBE_LIMIT", 60)).WithUnitProbeMax(envInt("UNIT_PROBE_MAX", 1000))
 
 	// TaxisNet session bridge. finddoctors v2.0.3 gates every upstream call behind
 	// a JSESSIONID cookie; we accept it at runtime from a local browser bridge (or
