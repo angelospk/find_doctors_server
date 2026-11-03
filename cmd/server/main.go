@@ -186,8 +186,7 @@ func main() {
 		api.TimeoutMiddleware(30*time.Second),
 	)
 
-	publicAddr := envString("LISTEN_ADDR", ":8080")
-	adminAddr := envString("ADMIN_ADDR", ":9090")
+	publicAddr, adminAddr := listenAddrs()
 
 	publicSrv := &http.Server{
 		Addr:              publicAddr,
@@ -272,6 +271,12 @@ func corsOrigins() []string {
 		}
 	}
 	return out
+}
+
+// listenAddrs binds loopback by default; exposing either server is an explicit
+// LISTEN_ADDR / ADMIN_ADDR choice (the admin server has no auth).
+func listenAddrs() (public, admin string) {
+	return envString("LISTEN_ADDR", "127.0.0.1:8080"), envString("ADMIN_ADDR", "127.0.0.1:9090")
 }
 
 func envString(k, def string) string {

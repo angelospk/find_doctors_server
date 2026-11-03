@@ -12,3 +12,4 @@ node_modules/
 # The compiled server. It was committed once, at 15 MB, and every rebuild since
 # has shown up as a binary diff nobody can read or review.
 /aggregator_server
+/bin/

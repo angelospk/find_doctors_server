@@ -46,8 +46,8 @@ The page is explicit about points that are easy to get wrong:
 
 > **Requires Go 1.26+ to build** (see `go.mod`).
 
-The public REST API listens on `:8080` (override with `LISTEN_ADDR`). A separate
-admin server on `:9090` (`ADMIN_ADDR`) exposes Prometheus `/metrics` and a fast
+The public REST API listens on `127.0.0.1:8080` (override with `LISTEN_ADDR`, e.g.
+`:8080` to expose it). A separate admin server on `127.0.0.1:9090` (`ADMIN_ADDR`) exposes Prometheus `/metrics` and a fast
 `/healthz`. All responses are `application/json`.
 
 ### Conventions
